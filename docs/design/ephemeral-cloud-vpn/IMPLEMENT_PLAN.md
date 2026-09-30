@@ -4,9 +4,9 @@
 
 Prove the first vertical slice in Tencent Cloud `ap-guangzhou`, targeting a Shadowsocks server reachable from North America through a separate client. Validate the persistent, user-owned SCF custom-image controller, its permission boundary, and automatic one-hour cleanup before app work depends on them.
 
-- [ ] T1.1 Confirm CVM/SCF availability and API behavior in `ap-guangzhou` — depends: none
+- [ ] T1.1 Confirm CVM/SCF availability and API behavior in `ap-guangzhou`, including same-region private TCR image requirements — depends: none
 - [ ] T1.2 Specify the Shadowsocks server bootstrap and connection fields for a separate client — depends: T1.1
-- [ ] T1.3 Build a custom SCF container image with the required Tencent SDK and provisioning tools; document one-time installation outside the app — depends: T1.1
+- [ ] T1.3 Build a custom SCF container image under Tencent's image-size limit with the required Tencent SDK and provisioning tools; document one-time installation outside the app — depends: T1.1
 - [ ] T1.4 Prototype app invocation and controller operation after app termination or phone shutdown — depends: T1.3
 - [ ] T1.5 Validate CAM permissions per API, including region/resource/tag restrictions and create-time gaps — depends: T1.4
 - [ ] T1.6 Prototype one-hour expiry scheduling using SCF timer or EventBridge; verify delivery, retries, quotas, and schedule cleanup — depends: T1.3

@@ -34,6 +34,22 @@ struct ShadowsocksConfig: Codable, Hashable {
         return URL(string: "shadowrocket://add/\(uriString)")
     }
 
+    var base64Subscription: String {
+        guard !uriString.isEmpty else { return "" }
+        return Data(uriString.utf8).base64EncodedString()
+    }
+
+    var plainTextInfo: String {
+        """
+        Server: \(host)
+        Port: \(port)
+        Password: \(password)
+        Method: \(method)
+        Tag: \(tag)
+        URI: \(uriString)
+        """
+    }
+
     static func generatePassword(length: Int = 16) -> String {
         let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return String((0..<length).compactMap { _ in chars.randomElement() })

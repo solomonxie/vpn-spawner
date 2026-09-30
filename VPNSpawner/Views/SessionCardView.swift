@@ -6,7 +6,7 @@ struct SessionCardView: View {
     @State private var showPassword = false
     @State private var showQRCode = false
     @State private var showStopConfirmation = false
-    @State private var copiedNotice = false
+    @State private var copiedMessage = ""
 
     var body: some View {
         VStack(spacing: 20) {
@@ -178,6 +178,23 @@ struct SessionCardView: View {
             }
 
             HStack {
+                Text("Sub URL")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(SubscriptionServer.shared.subscriptionURLString)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.teal)
+                Button {
+                    UIPasteboard.general.string = SubscriptionServer.shared.subscriptionURLString
+                    flashCopied(message: "Copied Subscription URL")
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
                 Text("Est. Cost")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -200,7 +217,7 @@ struct SessionCardView: View {
             if copyable && value != "—" {
                 Button {
                     UIPasteboard.general.string = value
-                    flashCopied()
+                    flashCopied(message: "Copied \(title)")
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .foregroundStyle(.secondary)
@@ -211,6 +228,57 @@ struct SessionCardView: View {
 
     private var actionButtonsSection: some View {
         VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Menu {
+                    Button {
+                        UIPasteboard.general.string = session.shadowsocks.uriString
+                        flashCopied(message: "Copied ss:// URI")
+                    } label: {
+                        Label("Copy ss:// URI", systemImage: "link")
+                    }
+                    Button {
+                        UIPasteboard.general.string = session.shadowsocks.plainTextInfo
+                        flashCopied(message: "Copied Server Details")
+                    } label: {
+                        Label("Copy Plain Credentials", systemImage: "text.alignleft")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.on.doc")
+                        Text("Copy Server Info")
+                    }
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Menu {
+                    Button {
+                        UIPasteboard.general.string = SubscriptionServer.shared.subscriptionURLString
+                        flashCopied(message: "Copied Subscription URL")
+                    } label: {
+                        Label("Copy URL (http://...)", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    Button {
+                        UIPasteboard.general.string = session.shadowsocks.base64Subscription
+                        flashCopied(message: "Copied Base64 String", isSuccess: true)
+                    } label: {
+                        Label("Copy Base64 Subscription", systemImage: "doc.plaintext")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                        Text("Copy Sub URL")
+                    }
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.teal)
+            }
+
             HStack(spacing: 12) {
                 Button {
                     guard let url = session.shadowsocks.shadowrocketURL else { return }
@@ -218,34 +286,32 @@ struct SessionCardView: View {
                         UIApplication.shared.open(url)
                     } else {
                         UIPasteboard.general.string = session.shadowsocks.uriString
-                        flashCopied()
+                        flashCopied(message: "Copied ss:// URI (Auto-imports on app open)")
                     }
                 } label: {
-                    Label("Shadowrocket", systemImage: "arrow.up.forward.app")
-                        .font(.subheadline.bold())
+                    Label("Import to Shadowrocket", systemImage: "arrow.up.forward.app")
+                        .font(.caption.bold())
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 8)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
 
                 Button {
                     showQRCode = true
                 } label: {
-                    Label("QR Code", systemImage: "qrcode")
-                        .font(.subheadline.bold())
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 16)
+                    Image(systemName: "qrcode")
+                        .font(.caption.bold())
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 14)
                 }
                 .buttonStyle(.bordered)
             }
 
-            Button {
-                UIPasteboard.general.string = session.shadowsocks.uriString
-                flashCopied()
-            } label: {
-                Label(copiedNotice ? "Copied!" : "Copy URI Link", systemImage: copiedNotice ? "checkmark" : "link")
+            if !copiedMessage.isEmpty {
+                Text(copiedMessage)
                     .font(.caption.bold())
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.green)
+                    .transition(.opacity)
             }
         }
     }
@@ -280,10 +346,14 @@ struct SessionCardView: View {
         }
     }
 
-    private func flashCopied() {
-        copiedNotice = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            copiedNotice = false
+    private func flashCopied(message: String = "Copied!", isSuccess: Bool = true) {
+        copiedMessage = message
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(isSuccess ? .success : .warning)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if copiedMessage == message {
+                copiedMessage = ""
+            }
         }
     }
 }

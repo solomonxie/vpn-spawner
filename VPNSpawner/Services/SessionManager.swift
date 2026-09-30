@@ -23,6 +23,9 @@ final class SessionManager: ObservableObject {
            let session = try? JSONDecoder().decode(SessionRecord.self, from: data) {
             currentSession = session
             appendLog("Restored active session \(session.id) [\(session.status.rawValue)]")
+            if session.status == .ready {
+                SubscriptionServer.shared.start(with: session.shadowsocks.uriString)
+            }
         }
         if let data = UserDefaults.standard.data(forKey: historyKey),
            let list = try? JSONDecoder().decode([SessionRecord].self, from: data) {
@@ -64,6 +67,13 @@ final class SessionManager: ObservableObject {
         if session.status == .ready || session.status == .provisioning {
             objectWillChange.send()
         }
+    }
+
+    private func markReady(session: inout SessionRecord) {
+        session.status = .ready
+        currentSession = session
+        persistState()
+        SubscriptionServer.shared.start(with: session.shadowsocks.uriString)
     }
 
     func appendLog(_ message: String) {
@@ -145,9 +155,7 @@ final class SessionManager: ObservableObject {
                 if let ip = result.publicIP {
                     session.publicIP = ip
                     session.shadowsocks.host = ip
-                    session.status = .ready
-                    currentSession = session
-                    persistState()
+                    markReady(session: &session)
                     appendLog("Controller returned node \(session.instanceId ?? "") with IP \(ip)")
                 } else if let instanceId = session.instanceId {
                     await pollDirectInstance(instanceId: instanceId, region: region, credential: credential)
@@ -183,9 +191,7 @@ final class SessionManager: ObservableObject {
                     guard var session = currentSession else { return }
                     session.publicIP = ip
                     session.shadowsocks.host = ip
-                    session.status = .ready
-                    currentSession = session
-                    persistState()
+                    markReady(session: &session)
                     appendLog("Node is RUNNING. Assigned public IP: \(ip)")
                     return
                 }
@@ -217,9 +223,7 @@ final class SessionManager: ObservableObject {
         let simulatedIP = "119.29.\(Int.random(in: 10...240)).\(Int.random(in: 2...254))"
         s.publicIP = simulatedIP
         s.shadowsocks.host = simulatedIP
-        s.status = .ready
-        currentSession = s
-        persistState()
+        markReady(session: &s)
         appendLog("Demo node ready at \(simulatedIP):\(s.shadowsocks.port)")
 
         isOperating = false
@@ -284,6 +288,7 @@ final class SessionManager: ObservableObject {
         history.insert(session, at: 0)
         if history.count > 20 { history.removeLast() }
         currentSession = nil
+        SubscriptionServer.shared.stop()
         persistState()
         appendLog("Session \(session.id) successfully terminated. Resources released.")
 
@@ -310,10 +315,12 @@ final class SessionManager: ObservableObject {
                     updated.publicIP = ip
                     updated.shadowsocks.host = ip
                     updated.status = .ready
+                    SubscriptionServer.shared.start(with: updated.shadowsocks.uriString)
                 }
             } else if info.state == "TERMINATING" || info.state == "SHUTDOWN" {
                 updated.status = .terminated
                 currentSession = nil
+                SubscriptionServer.shared.stop()
                 history.insert(updated, at: 0)
                 persistState()
                 appendLog("Remote instance \(instanceId) is already \(info.state). Session closed.")

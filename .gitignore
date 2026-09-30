@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+DerivedData/
+.swiftpm/
+Pods/
+build/
+dist/
+.env
+.env.*
+!.env.example
+*.mobileprovision
+*.p12
+*.pem
+*.key
+*.tfstate
+*.tfstate.*
+.terraform/

@@ -1,18 +1,28 @@
-# Ephemeral Cloud VPN
+# Ephemeral Cloud VPN (VPN Spawner)
 
-> 🚧 Work in progress — not yet functional.
+Native iOS app for launching temporary Tencent Cloud nodes in `ap-guangzhou`, configuring a Shadowsocks server, and cleaning up resources upon session expiry.
 
-An iPhone app for launching temporary Tencent Cloud nodes in `ap-guangzhou`, installing a Shadowsocks server, and cleaning up the cloud resources when you finish. A user-owned Tencent Cloud Function (SCF), deployed from a custom container image and invoked on demand, runs provisioning and cleanup. Sessions default to a one-hour lifetime with scheduled cleanup. The client app (such as Shadowrocket) is outside this project's scope.
+## Features
 
-## Product direction
+- **Lifecycle Orchestration**: One-tap provisioning of ephemeral Tencent Cloud CVM instances with automated Shadowsocks bootstrap.
+- **Safety Deadlines**: Default 60-minute session countdown with automatic termination and teardown confirmation.
+- **Client Integration**: One-tap Shadowrocket URI copy, deep-linking, and QR code display.
+- **Dual Execution**: Supports direct Tencent Cloud CVM API calls or user-owned SCF container controller invocation.
+- **Security**: Cloud credentials stored exclusively in iOS Keychain.
+- **Demo / Sandbox Mode**: Full offline simulation mode to test UI and lifecycle without cloud costs.
 
-- Use credentials supplied by the user to provision a node in a selected cloud region.
-- Install and configure the Shadowsocks server on the node; show connection details for use in a separate client.
-- Track resources created for each session and offer an explicit stop-and-cleanup flow.
-- Keep any orchestration inside the user's cloud account; the project does not operate a backend.
+## Architecture
 
-The first release should prove one provider, one region, and one server protocol end to end before expanding to more clouds or protocols. See [the product design](docs/design/ephemeral-cloud-vpn/DESIGN.md) and [implementation plan](docs/design/ephemeral-cloud-vpn/IMPLEMENT_PLAN.md).
+- **iOS Client**: Native SwiftUI app (`VPNSpawner/`), built with XcodeGen.
+- **SCF Controller**: Optional containerized controller (`controller/`) for cloud-side persistence and cleanup schedules.
 
-## Security and cost
+## Building and Installing
 
-Cloud credentials can create billable, internet-facing resources. The app must explain the required permissions, protect the controller invocation credential with the platform credential store, scope created resources for cleanup, and show what will be deleted before stopping a session. Cloud-side deletion can fail or be interrupted, so sessions need reconciliation and a visible cleanup status. This software is not yet suitable for production or sensitive traffic.
+```bash
+# Generate Xcode project
+xcodegen generate
+
+# Build and install to connected device
+xcodebuild -project VPNSpawner.xcodeproj -scheme VPNSpawner -configuration Debug -destination 'platform=iOS' build
+xcrun devicectl device install app --device <UDID> <path-to-.app>
+```

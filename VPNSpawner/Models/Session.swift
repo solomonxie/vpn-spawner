@@ -99,4 +99,11 @@ struct SessionRecord: Codable, Identifiable, Hashable {
     var currentCostEstimate: Double {
         elapsedHours * estimatedCostPerHour
     }
+
+    var subscriptionURLString: String {
+        if let publicIP, !publicIP.isEmpty, !isDemo {
+            return "http://\(publicIP):8389/sub"
+        }
+        return "http://127.0.0.1:8964/sub"
+    }
 }

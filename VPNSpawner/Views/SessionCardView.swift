@@ -182,11 +182,11 @@ struct SessionCardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(SubscriptionServer.shared.subscriptionURLString)
+                Text(session.subscriptionURLString)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.teal)
                 Button {
-                    UIPasteboard.general.string = SubscriptionServer.shared.subscriptionURLString
+                    UIPasteboard.general.string = session.subscriptionURLString
                     flashCopied(message: "Copied Subscription URL")
                 } label: {
                     Image(systemName: "doc.on.doc")
@@ -255,10 +255,10 @@ struct SessionCardView: View {
 
                 Menu {
                     Button {
-                        UIPasteboard.general.string = SubscriptionServer.shared.subscriptionURLString
+                        UIPasteboard.general.string = session.subscriptionURLString
                         flashCopied(message: "Copied Subscription URL")
                     } label: {
-                        Label("Copy URL (http://...)", systemImage: "antenna.radiowaves.left.and.right")
+                        Label("Copy URL (\(session.isDemo ? "127.0.0.1" : "Server IP"))", systemImage: "antenna.radiowaves.left.and.right")
                     }
                     Button {
                         UIPasteboard.general.string = session.shadowsocks.base64Subscription

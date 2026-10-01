@@ -174,6 +174,7 @@ enum ComputeClient {
         region: String,
         shadowsocks: ShadowsocksConfig,
         sessionTag: String,
+        securityGroupId: String,
         credential: CloudSigner.Credential
     ) async throws -> String {
         let zone = await resolveZone(region: region, credential: credential)
@@ -188,6 +189,7 @@ enum ComputeClient {
             "InstanceChargeType": "POSTPAID_BY_HOUR",
             "InstanceName": "vpn-\(sessionTag)",
             "UserData": base64UserData,
+            "SecurityGroupIds": [securityGroupId],
             "InternetAccessible": [
                 "InternetChargeType": "TRAFFIC_POSTPAID_BY_HOUR",
                 "InternetMaxBandwidthOut": 30,

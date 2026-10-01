@@ -124,15 +124,39 @@ final class SessionManager: ObservableObject {
         let credential = CloudSigner.Credential(secretId: config.secretId, secretKey: secretKey)
 
         do {
+            operationStatusMessage = "Detecting your public IP..."
+            let myIP = try await PublicIPService.current()
+            appendLog("Node will only accept traffic from \(myIP)")
+
             switch config.executionMode {
             case .direct:
-                operationStatusMessage = "Launching CVM instance with Shadowsocks..."
-                let instanceId = try await ComputeClient.launchInstance(
-                    region: region,
-                    shadowsocks: session.shadowsocks,
+                operationStatusMessage = "Creating firewall for \(myIP)..."
+                let sgId = try await FirewallClient.create(
                     sessionTag: tag,
+                    allowIPs: [myIP],
+                    region: region,
                     credential: credential
                 )
+                session.securityGroupId = sgId
+                session.allowedIPs = [myIP]
+                currentSession = session
+                persistState()
+                appendLog("Security group created: \(sgId)")
+
+                operationStatusMessage = "Launching CVM instance with Shadowsocks..."
+                let instanceId: String
+                do {
+                    instanceId = try await ComputeClient.launchInstance(
+                        region: region,
+                        shadowsocks: session.shadowsocks,
+                        sessionTag: tag,
+                        securityGroupId: sgId,
+                        credential: credential
+                    )
+                } catch {
+                    _ = await FirewallClient.delete(securityGroupId: sgId, region: region, credential: credential, attempts: 1)
+                    throw error
+                }
                 session.instanceId = instanceId
                 currentSession = session
                 persistState()
@@ -147,11 +171,19 @@ final class SessionManager: ObservableObject {
                     region: region,
                     action: "launch",
                     session: session,
+                    extra: ["allowIps": [myIP]],
                     credential: credential
                 )
+                if !result.success {
+                    throw CloudAPIError.badResponse(result.message ?? "Controller launch failed")
+                }
                 if let instanceId = result.instanceId {
                     session.instanceId = instanceId
                 }
+                session.securityGroupId = result.securityGroupId
+                session.allowedIPs = result.allowedIps ?? [myIP]
+                currentSession = session
+                persistState()
                 if let ip = result.publicIP {
                     session.publicIP = ip
                     session.shadowsocks.host = ip
@@ -250,6 +282,50 @@ final class SessionManager: ObservableObject {
         }
     }
 
+    func allowCurrentIP() async {
+        guard var session = currentSession, session.status == .ready, !session.isDemo else { return }
+        let (config, secretKey) = CloudCredentialConfig.load()
+        let credential = CloudSigner.Credential(secretId: config.secretId, secretKey: secretKey)
+
+        isOperating = true
+        operationStatusMessage = "Adding current IP to allowlist..."
+        defer {
+            isOperating = false
+            operationStatusMessage = ""
+        }
+
+        do {
+            let ip = try await PublicIPService.current()
+            let allowed: [String]
+            if config.executionMode == .controller {
+                let result = try await FunctionClient.invoke(
+                    functionName: config.controllerFunctionName,
+                    region: session.region,
+                    action: "allow_ip",
+                    session: session,
+                    extra: ["ip": ip],
+                    credential: credential
+                )
+                guard result.success, let ips = result.allowedIps else {
+                    throw CloudAPIError.badResponse(result.message ?? "Controller allow_ip failed")
+                }
+                session.securityGroupId = result.securityGroupId ?? session.securityGroupId
+                allowed = ips
+            } else {
+                guard let sgId = session.securityGroupId else {
+                    throw CloudAPIError.badResponse("Session has no security group")
+                }
+                allowed = try await FirewallClient.allow(ip: ip, securityGroupId: sgId, region: session.region, credential: credential)
+            }
+            session.allowedIPs = allowed
+            currentSession = session
+            persistState()
+            appendLog("Allowed \(ip). Allowlist: \(allowed.joined(separator: ", "))")
+        } catch {
+            appendLog("Allow current IP failed: \(error.localizedDescription)")
+        }
+    }
+
     func terminateSession() async {
         guard var session = currentSession else { return }
         session.status = .stopping
@@ -279,6 +355,11 @@ final class SessionManager: ObservableObject {
                     session: session,
                     credential: credential
                 )
+            }
+            if let sgId = session.securityGroupId {
+                operationStatusMessage = "Releasing firewall \(sgId)..."
+                let deleted = await FirewallClient.delete(securityGroupId: sgId, region: session.region, credential: credential)
+                appendLog(deleted ? "Security group \(sgId) deleted" : "Security group \(sgId) still in use; will be swept on next launch")
             }
         } else {
             try? await Task.sleep(nanoseconds: 1_000_000_000)

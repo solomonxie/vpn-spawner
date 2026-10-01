@@ -194,6 +194,29 @@ struct SessionCardView: View {
                 }
             }
 
+            if !session.isDemo {
+                HStack(alignment: .top) {
+                    Text("Allowed IPs")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        ForEach(session.allowedIPs ?? [], id: \.self) { ip in
+                            Text(ip)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                    }
+                    Button {
+                        Task { await manager.allowCurrentIP() }
+                    } label: {
+                        Label("Add my IP", systemImage: "plus.circle")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(manager.isOperating)
+                }
+            }
+
             HStack {
                 Text("Est. Cost")
                     .font(.caption)

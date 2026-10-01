@@ -6,6 +6,8 @@ struct ControllerInvocationResult: Decodable {
     let instanceId: String?
     let publicIP: String?
     let message: String?
+    let securityGroupId: String?
+    let allowedIps: [String]?
 }
 
 enum FunctionClient {
@@ -18,9 +20,10 @@ enum FunctionClient {
         region: String,
         action: String,
         session: SessionRecord,
+        extra: [String: Any] = [:],
         credential: CloudSigner.Credential
     ) async throws -> ControllerInvocationResult {
-        let requestDict: [String: Any] = [
+        var requestDict: [String: Any] = [
             "action": action,
             "sessionId": session.id,
             "region": region,
@@ -32,6 +35,10 @@ enum FunctionClient {
             ],
             "expiryTimestamp": Int(session.expiryTime.timeIntervalSince1970),
         ]
+        if let sgId = session.securityGroupId {
+            requestDict["securityGroupId"] = sgId
+        }
+        requestDict.merge(extra) { _, new in new }
 
         let clientContextData = try JSONSerialization.data(withJSONObject: requestDict)
         let clientContextString = String(data: clientContextData, encoding: .utf8) ?? "{}"
@@ -81,7 +88,9 @@ enum FunctionClient {
             status: "ok",
             instanceId: nil,
             publicIP: nil,
-            message: decoded.Response.Result?.RetMsg
+            message: decoded.Response.Result?.RetMsg,
+            securityGroupId: nil,
+            allowedIps: nil
         )
     }
 }

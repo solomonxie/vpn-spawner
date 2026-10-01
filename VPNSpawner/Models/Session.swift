@@ -29,6 +29,7 @@ struct SessionRecord: Codable, Identifiable, Hashable {
     var instanceId: String?
     var publicIP: String?
     var securityGroupId: String?
+    var allowedIPs: [String]?
     var shadowsocks: ShadowsocksConfig
     var estimatedCostPerHour: Double
     var isDemo: Bool

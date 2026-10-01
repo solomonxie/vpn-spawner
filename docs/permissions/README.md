@@ -8,7 +8,7 @@ Verified by a passing `tests/test_real_lifecycle.py` run.
 
 | Step | API | Permission |
 |---|---|---|
-| Pick image | DescribeImages | `cvm:DescribeImages` |
+| Pick zone / type / image | DescribeZoneInstanceConfigInfos, DescribeImages | `cvm:DescribeZoneInstanceConfigInfos`, `cvm:DescribeImages` |
 | Firewall | CreateSecurityGroup (+Tags), CreateSecurityGroupPolicies | `cvm:CreateSecurityGroup`, `vpc:CreateSecurityGroupPolicies`, `tag:*Resource*` |
 | Launch | RunInstances (SecurityGroupIds, TagSpecification) | `cvm:RunInstances`, `finance:trade` |
 | Poll | DescribeInstances | `cvm:DescribeInstances` |

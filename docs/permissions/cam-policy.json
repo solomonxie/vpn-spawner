@@ -9,6 +9,7 @@
         "cvm:DescribeInstances",
         "cvm:DescribeInstancesStatus",
         "cvm:DescribeInstanceTypeConfigs",
+        "cvm:DescribeZoneInstanceConfigInfos",
         "cvm:RunInstances",
         "vpc:DescribeVpcEx",
         "vpc:DescribeSubnetEx",

@@ -30,16 +30,20 @@ def instance_firewall(client, fw_client, instance_id):
             return sg_id
     return None
 
-def resolve_zone(client, region):
-    try:
-        req = models.DescribeZonesRequest()
-        resp = client.DescribeZones(req)
-        for z in resp.ZoneSet:
-            if z.ZoneState == "AVAILABLE":
-                return z.Zone
-    except Exception:
-        pass
-    return f"{region}-3"
+INSTANCE_TYPES = ["SA2.MEDIUM2", "S5.MEDIUM2", "SA3.MEDIUM2", "SA5.MEDIUM2", "S6.MEDIUM2"]
+
+def resolve_placement(client, region):
+    """Cheapest (zone, instance type) currently on sale, hourly billing."""
+    req = models.DescribeZoneInstanceConfigInfosRequest()
+    req.from_json_string(json.dumps({"Filters": [
+        {"Name": "instance-charge-type", "Values": ["POSTPAID_BY_HOUR"]},
+        {"Name": "instance-type", "Values": INSTANCE_TYPES},
+    ]}))
+    on_sale = [q for q in client.DescribeZoneInstanceConfigInfos(req).InstanceTypeQuotaSet if q.Status == "SELL"]
+    if not on_sale:
+        raise RuntimeError(f"None of {INSTANCE_TYPES} on sale in {region}")
+    best = min(on_sale, key=lambda q: q.Price.UnitPrice)
+    return best.Zone, best.InstanceType
 
 def resolve_image(client, region):
     try:
@@ -177,7 +181,7 @@ def main_handler(event, context):
             return {"success": False, "message": "allowIps is required"}
         shadowsocks = req.get("shadowsocks", {})
         user_data = build_user_data(shadowsocks)
-        zone = resolve_zone(client, region)
+        zone, instance_type = resolve_placement(client, region)
         image_id = resolve_image(client, region)
         try:
             firewall.sweep_orphans(fw_client)
@@ -187,7 +191,7 @@ def main_handler(event, context):
 
         cvm_req = models.RunInstancesRequest()
         cvm_req.Placement = {"Zone": zone}
-        cvm_req.InstanceType = "S5.MEDIUM2"
+        cvm_req.InstanceType = instance_type
         cvm_req.ImageId = image_id
         cvm_req.InstanceChargeType = "POSTPAID_BY_HOUR"
         cvm_req.InstanceName = f"vpn-{session_id}"
@@ -215,6 +219,8 @@ def main_handler(event, context):
             "success": True,
             "instanceId": instance_ids[0] if instance_ids else None,
             "securityGroupId": sg_id,
+            "zone": zone,
+            "instanceType": instance_type,
             "allowedIps": firewall.allowed_ips(fw_client, sg_id),
             "status": "provisioning"
         }

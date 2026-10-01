@@ -23,6 +23,15 @@ def load_dotenv():
                     k, v = line.split("=", 1)
                     os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
 
+def current_public_ip():
+    for url in ("https://api.ipify.org", "https://checkip.amazonaws.com"):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return resp.read().decode("utf-8").strip()
+        except Exception:
+            continue
+    raise RuntimeError("Could not detect current public IP; pass --allow-ip")
+
 def test_tcp_port(host, port, timeout=5):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
@@ -52,7 +61,9 @@ def main():
     parser.add_argument("--port", type=int, default=8388, help="Shadowsocks port")
     parser.add_argument("--method", default="chacha20-ietf-poly1305", help="Cipher method")
     parser.add_argument("--keep", action="store_true", help="Keep instance running instead of cleaning up")
-    parser.add_argument("--terminate", metavar="INSTANCE_ID", help="Terminate a specific instance")
+    parser.add_argument("--terminate", metavar="INSTANCE_ID", help="Terminate a specific instance and its security group")
+    parser.add_argument("--allow-ip", action="append", default=[], help="IP allowed to reach the node (repeatable; default: current public IP)")
+    parser.add_argument("--add-ip", metavar="INSTANCE_ID", help="Add --allow-ip (or current public IP) to a running node's allowlist")
     args = parser.parse_args()
 
     secret_id = args.secret_id
@@ -62,6 +73,22 @@ def main():
         print("ERROR: Tencent Cloud credentials required.")
         print("Provide via --secret-id and --secret-key, or set TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY in environment or .env file.")
         sys.exit(1)
+
+    if args.add_ip:
+        ips = args.allow_ip or [current_public_ip()]
+        for ip in ips:
+            resp = main_handler({
+                "ClientContext": {
+                    "action": "allow_ip",
+                    "region": args.region,
+                    "instanceId": args.add_ip,
+                    "ip": ip,
+                    "secretId": secret_id,
+                    "secretKey": secret_key
+                }
+            }, None)
+            print(f"allow {ip}:", resp)
+        return
 
     if args.terminate:
         print(f"Terminating instance {args.terminate} in {args.region}...")
@@ -77,6 +104,7 @@ def main():
         print("Termination response:", resp)
         return
 
+    allow_ips = args.allow_ip or [current_public_ip()]
     session_id = f"test-{int(time.time()) % 10000}"
     password = base64.b64encode(os.urandom(12)).decode("ascii")
 
@@ -84,6 +112,7 @@ def main():
     print(f"Session ID : {session_id}")
     print(f"Cipher     : {args.method}")
     print(f"Port       : {args.port}")
+    print(f"Allow IPs  : {', '.join(allow_ips)}")
 
     launch_payload = {
         "action": "launch",
@@ -91,6 +120,7 @@ def main():
         "region": args.region,
         "secretId": secret_id,
         "secretKey": secret_key,
+        "allowIps": allow_ips,
         "shadowsocks": {
             "port": args.port,
             "password": password,
@@ -106,6 +136,7 @@ def main():
 
     instance_id = launch_res.get("instanceId")
     print(f"CVM Instance Created: {instance_id}")
+    print(f"Security Group      : {launch_res.get('securityGroupId')} allow={launch_res.get('allowedIps')}")
     print("Waiting for instance to be RUNNING and assign public IP...")
 
     public_ip = None
@@ -176,6 +207,8 @@ def main():
     else:
         print(f"\n[KEEP] Instance {instance_id} is running. Remember to terminate later:")
         print(f"venv/bin/python controller/spawn.py --region {args.region} --terminate {instance_id}")
+        print("If your IP changes:")
+        print(f"venv/bin/python controller/spawn.py --region {args.region} --add-ip {instance_id}")
 
 if __name__ == "__main__":
     main()

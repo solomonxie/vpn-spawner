@@ -7,45 +7,23 @@
         "cvm:DescribeZones",
         "cvm:DescribeImages",
         "cvm:DescribeInstances",
+        "cvm:DescribeInstancesStatus",
         "cvm:DescribeInstanceTypeConfigs",
-        "cvm:DescribeInstancesStatus"
-      ],
-      "resource": "*"
-    },
-    {
-      "effect": "allow",
-      "action": [
         "cvm:RunInstances",
-        "cvm:CreateKeyPair"
-      ],
-      "resource": "*"
-    },
-    {
-      "effect": "allow",
-      "action": [
-        "vpc:DescribeVpcs",
         "vpc:DescribeVpcEx",
-        "vpc:DescribeSubnets",
         "vpc:DescribeSubnetEx",
+        "cvm:DescribeSecurityGroups",
+        "cvm:DescribeSecurityGroupPolicies",
+        "cvm:DescribeSecurityGroupPolicys",
+        "cvm:CreateSecurityGroup",
+        "cvm:CreateSecurityGroupPolicy",
         "vpc:DescribeSecurityGroups",
-        "vpc:DescribeSecurityGroupEx",
         "vpc:DescribeSecurityGroupPolicies",
         "vpc:CreateSecurityGroup",
         "vpc:CreateSecurityGroupPolicies",
-        "vpc:DeleteSecurityGroup",
-        "vpc:AssociateSecurityGroups",
-        "vpc:DescribeAddresses",
-        "vpc:DescribeNetworkInterfaces"
-      ],
-      "resource": "*"
-    },
-    {
-      "effect": "allow",
-      "action": [
         "tag:AddResourceTag",
-        "tag:DescribeTagKeys",
-        "tag:DescribeTagValues",
-        "tag:DescribeResourceTagsByResourceIds"
+        "tag:TagResources",
+        "finance:trade"
       ],
       "resource": "*"
     },
@@ -53,12 +31,14 @@
       "effect": "allow",
       "action": [
         "cvm:TerminateInstances",
-        "cvm:StopInstances"
+        "cvm:DeleteSecurityGroup"
       ],
       "resource": "*",
       "condition": {
         "for_any_value:string_equal": {
-          "qcs:resource_tag": ["ManagedBy&VPNSpawner"]
+          "qcs:resource_tag": [
+            "ManagedBy&VPNSpawner"
+          ]
         }
       }
     }

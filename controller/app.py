@@ -4,14 +4,31 @@ import base64
 from tencentcloud.common import credential
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
-def get_client(region, secret_id=None, secret_key=None):
+try:
+    import firewall
+except ImportError:
+    from controller import firewall
+
+def get_credential(secret_id=None, secret_key=None):
     s_id = secret_id or os.environ.get("TENCENTCLOUD_SECRET_ID")
     s_key = secret_key or os.environ.get("TENCENTCLOUD_SECRET_KEY")
     if s_id and s_key:
-        cred = credential.Credential(s_id, s_key)
-    else:
-        cred = credential.EnvironmentVariableCredential().get_credential()
-    return cvm_client.CvmClient(cred, region)
+        return credential.Credential(s_id, s_key)
+    return credential.EnvironmentVariableCredential().get_credential()
+
+def get_client(region, secret_id=None, secret_key=None):
+    return cvm_client.CvmClient(get_credential(secret_id, secret_key), region)
+
+def instance_firewall(client, fw_client, instance_id):
+    req = models.DescribeInstancesRequest()
+    req.InstanceIds = [instance_id]
+    resp = client.DescribeInstances(req)
+    if not resp.InstanceSet:
+        return None
+    for sg_id in resp.InstanceSet[0].SecurityGroupIds or []:
+        if firewall.is_managed(fw_client, sg_id):
+            return sg_id
+    return None
 
 def resolve_zone(client, region):
     try:
@@ -150,13 +167,23 @@ def main_handler(event, context):
     secret_id = req.get("secretId")
     secret_key = req.get("secretKey")
 
-    client = get_client(region, secret_id, secret_key)
+    cred = get_credential(secret_id, secret_key)
+    client = cvm_client.CvmClient(cred, region)
+    fw_client = firewall.get_client(cred, region)
 
     if action == "launch":
+        allow_ips = req.get("allowIps") or []
+        if not allow_ips:
+            return {"success": False, "message": "allowIps is required"}
         shadowsocks = req.get("shadowsocks", {})
         user_data = build_user_data(shadowsocks)
         zone = resolve_zone(client, region)
         image_id = resolve_image(client, region)
+        try:
+            firewall.sweep_orphans(fw_client)
+        except Exception:
+            pass
+        sg_id = firewall.create(fw_client, session_id, allow_ips)
 
         cvm_req = models.RunInstancesRequest()
         cvm_req.Placement = {"Zone": zone}
@@ -165,6 +192,7 @@ def main_handler(event, context):
         cvm_req.InstanceChargeType = "POSTPAID_BY_HOUR"
         cvm_req.InstanceName = f"vpn-{session_id}"
         cvm_req.UserData = user_data
+        cvm_req.SecurityGroupIds = [sg_id]
         cvm_req.InternetAccessible = {
             "InternetChargeType": "TRAFFIC_POSTPAID_BY_HOUR",
             "InternetMaxBandwidthOut": 30,
@@ -177,13 +205,26 @@ def main_handler(event, context):
                 {"Key": "ManagedBy", "Value": "VPNSpawner"}
             ]
         }]
-        resp = client.RunInstances(cvm_req)
+        try:
+            resp = client.RunInstances(cvm_req)
+        except Exception:
+            firewall.delete(fw_client, sg_id, wait_seconds=0)
+            raise
         instance_ids = resp.InstanceIdSet
         return {
             "success": True,
             "instanceId": instance_ids[0] if instance_ids else None,
+            "securityGroupId": sg_id,
+            "allowedIps": firewall.allowed_ips(fw_client, sg_id),
             "status": "provisioning"
         }
+
+    elif action == "allow_ip":
+        ip = req.get("ip", "")
+        sg_id = req.get("securityGroupId") or instance_firewall(client, fw_client, req.get("instanceId", ""))
+        if not ip or not sg_id or not firewall.is_managed(fw_client, sg_id):
+            return {"success": False, "message": "ip and a VPNSpawner-managed instance/securityGroupId are required"}
+        return {"success": True, "securityGroupId": sg_id, "allowedIps": firewall.allow_ip(fw_client, sg_id, ip)}
 
     elif action == "status":
         instance_id = req.get("instanceId", "")
@@ -203,10 +244,14 @@ def main_handler(event, context):
 
     elif action == "terminate":
         instance_id = req.get("instanceId", "")
+        sg_id = req.get("securityGroupId") or instance_firewall(client, fw_client, instance_id)
         cvm_req = models.TerminateInstancesRequest()
         cvm_req.InstanceIds = [instance_id]
         cvm_req.ReleasePrepaidDataDisks = True
         client.TerminateInstances(cvm_req)
-        return {"success": True, "status": "terminated"}
+        sg_deleted = None
+        if sg_id and firewall.is_managed(fw_client, sg_id):
+            sg_deleted = firewall.delete(fw_client, sg_id, wait_seconds=req.get("firewallWaitSeconds", 120))
+        return {"success": True, "status": "terminated", "securityGroupId": sg_id, "securityGroupDeleted": sg_deleted}
 
     return {"success": False, "message": f"Unknown action: {action}"}

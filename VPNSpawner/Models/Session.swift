@@ -39,7 +39,7 @@ struct SessionRecord: Codable, Identifiable, Hashable {
         id: String = "sess_\(UUID().uuidString.prefix(8).lowercased())",
         status: SessionStatus = .idle,
         startTime: Date = Date(),
-        durationMinutes: Int = 60,
+        durationMinutes: Int = 30,
         region: String = "ap-guangzhou",
         instanceId: String? = nil,
         publicIP: String? = nil,

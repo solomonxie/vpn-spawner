@@ -3,7 +3,7 @@ import SwiftUI
 struct LaunchCardView: View {
     @ObservedObject var manager: SessionManager
     @State private var selectedRegion = "ap-guangzhou"
-    @State private var selectedDuration = 60
+    @State private var selectedDuration = 30
     @State private var selectedCipher = "chacha20-ietf-poly1305"
     @State private var portString = "8388"
 

@@ -11,123 +11,68 @@ enum ComputeClient {
     private static let service = "cvm"
     private static let version = "2017-03-12"
 
-    static func buildUserDataScript(shadowsocks: ShadowsocksConfig) -> String {
-        """
-        #!/bin/bash
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -y
-        apt-get install -y shadowsocks-libev python3
+    static let instanceTypes = ["SA2.MEDIUM2", "S5.MEDIUM2", "SA3.MEDIUM2", "SA5.MEDIUM2", "S6.MEDIUM2"]
+    private static let safeValue = try! NSRegularExpression(pattern: "^[A-Za-z0-9+/=_.:-]+$")
 
-        cat <<EOF > /etc/shadowsocks-libev/config.json
-        {
-            "server": "0.0.0.0",
-            "server_port": \(shadowsocks.port),
-            "password": "\(shadowsocks.password)",
-            "timeout": 300,
-            "method": "\(shadowsocks.method)",
-            "fast_open": false,
-            "nameserver": "8.8.8.8",
-            "mode": "tcp_and_udp"
+    /// Fills controller/bootstrap.sh (bundled), the same script the SCF controller uses.
+    static func buildUserDataScript(shadowsocks: ShadowsocksConfig, ikev2PSK: String) throws -> String {
+        guard let url = Bundle.main.url(forResource: "bootstrap", withExtension: "sh"),
+              var script = try? String(contentsOf: url, encoding: .utf8) else {
+            throw CloudAPIError.badResponse("bootstrap.sh missing from app bundle")
         }
-        EOF
-        systemctl restart shadowsocks-libev
-        systemctl enable shadowsocks-libev
-
-        mkdir -p /opt/vpn-sub
-        cat <<'PYEOF' > /opt/vpn-sub/sub_server.py
-        import http.server
-        import socketserver
-        import urllib.request
-        import base64
-
-        PORT = 8389
-        METHOD = "\(shadowsocks.method)"
-        PASSWORD = "\(shadowsocks.password)"
-        SS_PORT = \(shadowsocks.port)
-        TAG = "\(shadowsocks.tag)"
-
-        def get_ip():
-            try:
-                req = urllib.request.Request("http://metadata.tencentyun.com/latest/meta-data/public-ipv4", headers={"User-Agent": "curl/7.68.0"})
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    return resp.read().decode('utf-8').strip()
-            except Exception:
-                pass
-            try:
-                with urllib.request.urlopen("https://api.ipify.org", timeout=3) as resp:
-                    return resp.read().decode('utf-8').strip()
-            except Exception:
-                return "127.0.0.1"
-
-        class SubHandler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                ip = get_ip()
-                user_info = f"{METHOD}:{PASSWORD}@{ip}:{SS_PORT}"
-                b64_info = base64.b64encode(user_info.encode('utf-8')).decode('utf-8')
-                ss_uri = f"ss://{b64_info}#{TAG}\\n"
-                sub_body = base64.b64encode(ss_uri.encode('utf-8')).decode('utf-8')
-
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(sub_body)))
-                self.end_headers()
-                self.wfile.write(sub_body.encode('utf-8'))
-
-            def log_message(self, format, *args):
-                pass
-
-        with socketserver.TCPServer(("", PORT), SubHandler) as httpd:
-            httpd.serve_forever()
-        PYEOF
-
-        cat <<EOF > /etc/systemd/system/vpn-sub.service
-        [Unit]
-        Description=VPN Public Subscription Service
-        After=network.target
-
-        [Service]
-        Type=simple
-        ExecStart=/usr/bin/python3 /opt/vpn-sub/sub_server.py
-        Restart=always
-
-        [Install]
-        WantedBy=multi-user.target
-        EOF
-
-        systemctl daemon-reload
-        systemctl enable --now vpn-sub.service
-        """
+        let values = [
+            "SS_PORT": String(shadowsocks.port),
+            "SS_PASSWORD": shadowsocks.password,
+            "SS_METHOD": shadowsocks.method,
+            "TAG": shadowsocks.tag,
+            "IKEV2_PSK": ikev2PSK,
+        ]
+        for (key, value) in values {
+            let range = NSRange(value.startIndex..., in: value)
+            guard safeValue.firstMatch(in: value, range: range) != nil else {
+                throw CloudAPIError.badResponse("\(key) has characters unsafe for the bootstrap script")
+            }
+            script = script.replacingOccurrences(of: "{{\(key)}}", with: value)
+        }
+        return script
     }
 
-    static func resolveZone(region: String, credential: CloudSigner.Credential) async -> String {
-        do {
-            let data = try await CloudAPIClient.request(
-                host: host,
-                service: service,
-                action: "DescribeZones",
-                version: version,
-                region: region,
-                payload: [:],
-                credential: credential
-            )
-            struct ZoneResp: Decodable {
-                struct Body: Decodable {
-                    struct ZoneInfo: Decodable {
-                        let Zone: String
-                        let ZoneState: String
-                    }
-                    let ZoneSet: [ZoneInfo]?
+    /// Cheapest (zone, instance type) currently on sale with hourly billing.
+    static func resolvePlacement(region: String, credential: CloudSigner.Credential) async throws -> (zone: String, instanceType: String) {
+        let data = try await CloudAPIClient.request(
+            host: host,
+            service: service,
+            action: "DescribeZoneInstanceConfigInfos",
+            version: version,
+            region: region,
+            payload: [
+                "Filters": [
+                    ["Name": "instance-charge-type", "Values": ["POSTPAID_BY_HOUR"]],
+                    ["Name": "instance-type", "Values": instanceTypes],
+                ],
+            ],
+            credential: credential
+        )
+        struct QuotaResp: Decodable {
+            struct Body: Decodable {
+                struct Quota: Decodable {
+                    struct Price: Decodable { let UnitPrice: Double? }
+                    let Zone: String
+                    let InstanceType: String
+                    let Status: String
+                    let Price: Price?
                 }
-                let Response: Body
+                let InstanceTypeQuotaSet: [Quota]?
             }
-            let decoded = try JSONDecoder().decode(ZoneResp.self, from: data)
-            if let available = decoded.Response.ZoneSet?.first(where: { $0.ZoneState == "AVAILABLE" })?.Zone {
-                return available
-            }
-        } catch {
-            // fallback to default
+            let Response: Body
         }
-        return "\(region)-3"
+        let quotas = try JSONDecoder().decode(QuotaResp.self, from: data).Response.InstanceTypeQuotaSet ?? []
+        guard let best = quotas
+            .filter({ $0.Status == "SELL" })
+            .min(by: { ($0.Price?.UnitPrice ?? .infinity) < ($1.Price?.UnitPrice ?? .infinity) }) else {
+            throw CloudAPIError.badResponse("None of \(instanceTypes) on sale in \(region)")
+        }
+        return (best.Zone, best.InstanceType)
     }
 
     static func resolveImageId(region: String, credential: CloudSigner.Credential) async -> String {
@@ -175,16 +120,17 @@ enum ComputeClient {
         shadowsocks: ShadowsocksConfig,
         sessionTag: String,
         securityGroupId: String,
+        ikev2PSK: String,
         credential: CloudSigner.Credential
     ) async throws -> String {
-        let zone = await resolveZone(region: region, credential: credential)
+        let placement = try await resolvePlacement(region: region, credential: credential)
         let imageId = await resolveImageId(region: region, credential: credential)
-        let script = buildUserDataScript(shadowsocks: shadowsocks)
+        let script = try buildUserDataScript(shadowsocks: shadowsocks, ikev2PSK: ikev2PSK)
         let base64UserData = Data(script.utf8).base64EncodedString()
 
         let payload: [String: Any] = [
-            "Placement": ["Zone": zone],
-            "InstanceType": "S5.MEDIUM2",
+            "Placement": ["Zone": placement.zone],
+            "InstanceType": placement.instanceType,
             "ImageId": imageId,
             "InstanceChargeType": "POSTPAID_BY_HOUR",
             "InstanceName": "vpn-\(sessionTag)",

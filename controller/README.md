@@ -1,6 +1,19 @@
 # SCF Controller
 
 Ephemeral VPN controller running as a Tencent Cloud Function (SCF).
+Same code runs locally via `spawn.py` and `tests/test_real_lifecycle.py`.
+
+## Node
+
+One CVM, set up by `bootstrap.sh` (also bundled into the iOS app, so both paths provision identically):
+
+| Protocol | Port | Clients |
+|---|---|---|
+| Shadowsocks | TCP/UDP 8388 | Shadowrocket etc. |
+| IKEv2 PSK (strongSwan) | UDP 500/4500 | iOS, Android 12+, macOS native — no app |
+| HTTP | TCP 8389 | `/sub` ss:// feed, `/ikev2.mobileconfig` iPhone profile, `/health` |
+
+IKEv2 manual setup: Server = Remote ID = node IP, Local ID `vpn-client`, PSK from `launch` (`ikev2Psk`).
 
 ## Deploy to Tencent Cloud
 
@@ -21,7 +34,8 @@ ingress ALL only from the caller's IPs (`/32`), egress open.
 
 | Action | Input | Effect |
 |---|---|---|
-| `launch` | `allowIps: [ip]` (required) | create SG, bind to new CVM |
+| `launch` | `allowIps: [ip]` (required), `ikev2Psk` (optional, generated) | pick cheapest zone/type on sale, create SG, bind to new CVM |
+| `status` | `instanceId` | state + IP; once RUNNING, adds the node's own IP (hairpin) |
 | `allow_ip` | `instanceId` or `securityGroupId`, `ip` | add ingress rule, return `allowedIps` |
 | `terminate` | `instanceId` | terminate CVM, delete its SG |
 

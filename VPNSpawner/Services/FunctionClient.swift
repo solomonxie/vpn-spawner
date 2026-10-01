@@ -8,6 +8,7 @@ struct ControllerInvocationResult: Decodable {
     let message: String?
     let securityGroupId: String?
     let allowedIps: [String]?
+    let ikev2Psk: String?
 }
 
 enum FunctionClient {
@@ -90,7 +91,8 @@ enum FunctionClient {
             publicIP: nil,
             message: decoded.Response.Result?.RetMsg,
             securityGroupId: nil,
-            allowedIps: nil
+            allowedIps: nil,
+            ikev2Psk: nil
         )
     }
 }

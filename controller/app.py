@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import base64
+import secrets
 from tencentcloud.common import credential
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
@@ -63,96 +65,22 @@ def resolve_image(client, region):
         pass
     return "img-pi0ii46r"
 
-def build_user_data(shadowsocks):
-    port = shadowsocks.get("port", 8388)
-    password = shadowsocks.get("password", "")
-    method = shadowsocks.get("method", "chacha20-ietf-poly1305")
-    tag = shadowsocks.get("tag", "Tencent-Ephemeral")
+BOOTSTRAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bootstrap.sh")
+SAFE_VALUE = re.compile(r"^[A-Za-z0-9+/=_.:-]+$")
 
-    script = f"""#!/bin/bash
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y shadowsocks-libev python3
-
-cat <<EOF > /etc/shadowsocks-libev/config.json
-{{
-    "server": "0.0.0.0",
-    "server_port": {port},
-    "password": "{password}",
-    "timeout": 300,
-    "method": "{method}",
-    "fast_open": false,
-    "nameserver": "8.8.8.8",
-    "mode": "tcp_and_udp"
-}}
-EOF
-systemctl restart shadowsocks-libev
-systemctl enable shadowsocks-libev
-
-mkdir -p /opt/vpn-sub
-cat <<'PYEOF' > /opt/vpn-sub/sub_server.py
-import http.server
-import socketserver
-import urllib.request
-import base64
-
-PORT = 8389
-METHOD = "{method}"
-PASSWORD = "{password}"
-SS_PORT = {port}
-TAG = "{tag}"
-
-def get_ip():
-    try:
-        req = urllib.request.Request("http://metadata.tencentyun.com/latest/meta-data/public-ipv4", headers={{"User-Agent": "curl/7.68.0"}})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return resp.read().decode('utf-8').strip()
-    except Exception:
-        pass
-    try:
-        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as resp:
-            return resp.read().decode('utf-8').strip()
-    except Exception:
-        return "127.0.0.1"
-
-class SubHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        ip = get_ip()
-        user_info = f"{{METHOD}}:{{PASSWORD}}@{{ip}}:{{SS_PORT}}"
-        b64_info = base64.b64encode(user_info.encode('utf-8')).decode('utf-8')
-        ss_uri = f"ss://{{b64_info}}#{{TAG}}\\n"
-        sub_body = base64.b64encode(ss_uri.encode('utf-8')).decode('utf-8')
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(sub_body)))
-        self.end_headers()
-        self.wfile.write(sub_body.encode('utf-8'))
-
-    def log_message(self, format, *args):
-        pass
-
-with socketserver.TCPServer(("", PORT), SubHandler) as httpd:
-    httpd.serve_forever()
-PYEOF
-
-cat <<EOF > /etc/systemd/system/vpn-sub.service
-[Unit]
-Description=VPN Public Subscription Service
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /opt/vpn-sub/sub_server.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now vpn-sub.service
-"""
+def build_user_data(shadowsocks, ikev2_psk):
+    values = {
+        "SS_PORT": str(int(shadowsocks.get("port", 8388))),
+        "SS_PASSWORD": shadowsocks.get("password", ""),
+        "SS_METHOD": shadowsocks.get("method", "chacha20-ietf-poly1305"),
+        "TAG": shadowsocks.get("tag", "Tencent-Ephemeral"),
+        "IKEV2_PSK": ikev2_psk,
+    }
+    script = open(BOOTSTRAP).read()
+    for key, value in values.items():
+        if not SAFE_VALUE.match(value):
+            raise ValueError(f"{key} has characters unsafe for the bootstrap script")
+        script = script.replace("{{" + key + "}}", value)
     return base64.b64encode(script.encode("utf-8")).decode("utf-8")
 
 def main_handler(event, context):
@@ -180,7 +108,8 @@ def main_handler(event, context):
         if not allow_ips:
             return {"success": False, "message": "allowIps is required"}
         shadowsocks = req.get("shadowsocks", {})
-        user_data = build_user_data(shadowsocks)
+        ikev2_psk = req.get("ikev2Psk") or secrets.token_urlsafe(18)
+        user_data = build_user_data(shadowsocks, ikev2_psk)
         zone, instance_type = resolve_placement(client, region)
         image_id = resolve_image(client, region)
         try:
@@ -222,6 +151,7 @@ def main_handler(event, context):
             "zone": zone,
             "instanceType": instance_type,
             "allowedIps": firewall.allowed_ips(fw_client, sg_id),
+            "ikev2Psk": ikev2_psk,
             "status": "provisioning"
         }
 
@@ -239,13 +169,19 @@ def main_handler(event, context):
         resp = client.DescribeInstances(cvm_req)
         if resp.InstanceSet:
             inst = resp.InstanceSet[0]
-            ips = inst.PublicIpAddresses
-            return {
+            public_ip = (inst.PublicIpAddresses or [None])[0]
+            result = {
                 "success": True,
                 "instanceId": instance_id,
                 "status": inst.InstanceState,
-                "publicIP": ips[0] if ips else None
+                "publicIP": public_ip
             }
+            # Tunnelled traffic hairpinning back to the node arrives from its own public IP.
+            if inst.InstanceState == "RUNNING" and public_ip:
+                for sg_id in inst.SecurityGroupIds or []:
+                    if firewall.is_managed(fw_client, sg_id):
+                        result["allowedIps"] = firewall.allow_ip(fw_client, sg_id, public_ip)
+            return result
         return {"success": False, "message": "Instance not found"}
 
     elif action == "terminate":

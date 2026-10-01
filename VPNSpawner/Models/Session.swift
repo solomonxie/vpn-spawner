@@ -30,6 +30,7 @@ struct SessionRecord: Codable, Identifiable, Hashable {
     var publicIP: String?
     var securityGroupId: String?
     var allowedIPs: [String]?
+    var ikev2PSK: String?
     var shadowsocks: ShadowsocksConfig
     var estimatedCostPerHour: Double
     var isDemo: Bool
@@ -99,6 +100,11 @@ struct SessionRecord: Codable, Identifiable, Hashable {
 
     var currentCostEstimate: Double {
         elapsedHours * estimatedCostPerHour
+    }
+
+    var nativeProfileURL: URL? {
+        guard let publicIP, !publicIP.isEmpty, !isDemo, ikev2PSK != nil else { return nil }
+        return URL(string: "http://\(publicIP):8389/ikev2.mobileconfig")
     }
 
     var subscriptionURLString: String {

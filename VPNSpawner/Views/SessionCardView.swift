@@ -15,6 +15,7 @@ struct SessionCardView: View {
             if session.status == .ready {
                 connectionDetailsSection
                 actionButtonsSection
+                nativeVPNSection
             } else if session.status == .provisioning {
                 provisioningSection
             } else if session.status == .failed {
@@ -245,6 +246,39 @@ struct SessionCardView: View {
                     Image(systemName: "doc.on.doc")
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var nativeVPNSection: some View {
+        if let profileURL = session.nativeProfileURL, let psk = session.ikev2PSK, let ip = session.publicIP {
+            VStack(spacing: 10) {
+                Divider()
+                HStack {
+                    Text("Native VPN (IKEv2, no app)")
+                        .font(.caption.bold())
+                    Spacer()
+                }
+                detailRow(title: "Server / Remote ID", value: ip, copyable: true)
+                detailRow(title: "Local ID", value: "vpn-client", copyable: false)
+                detailRow(title: "Pre-shared Key", value: psk, copyable: true)
+
+                Button {
+                    UIApplication.shared.open(profileURL)
+                } label: {
+                    Label("Install iPhone VPN Profile", systemImage: "lock.shield")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+
+                Text("Opens Safari → Settings → Profile Downloaded → Install. Then Settings → VPN.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
     }

@@ -10,8 +10,10 @@ import urllib.request
 
 try:
     from app import main_handler
+    from ike_probe import probe as ike_probe
 except ImportError:
     from controller.app import main_handler
+    from controller.ike_probe import probe as ike_probe
 
 def load_dotenv():
     env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -52,9 +54,16 @@ def test_http_sub(url, timeout=5):
     except Exception:
         return False
 
+def node_health(public_ip, timeout=5):
+    try:
+        with urllib.request.urlopen(f"http://{public_ip}:8389/health", timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return {}
+
 def main():
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Spawn real ephemeral Shadowsocks node via controller")
+    parser = argparse.ArgumentParser(description="Spawn a real ephemeral Shadowsocks + IKEv2 node via the controller")
     parser.add_argument("--region", default=os.environ.get("TENCENTCLOUD_REGION", "ap-guangzhou"), help="Tencent Cloud region")
     parser.add_argument("--secret-id", default=os.environ.get("TENCENTCLOUD_SECRET_ID"), help="Tencent Cloud SecretId")
     parser.add_argument("--secret-key", default=os.environ.get("TENCENTCLOUD_SECRET_KEY"), help="Tencent Cloud SecretKey")
@@ -108,7 +117,7 @@ def main():
     session_id = f"test-{int(time.time()) % 10000}"
     password = base64.b64encode(os.urandom(12)).decode("ascii")
 
-    print(f"=== Spawning real Shadowsocks CVM in {args.region} ===")
+    print(f"=== Spawning real Shadowsocks + IKEv2 CVM in {args.region} ===")
     print(f"Session ID : {session_id}")
     print(f"Cipher     : {args.method}")
     print(f"Port       : {args.port}")
@@ -137,6 +146,8 @@ def main():
     instance_id = launch_res.get("instanceId")
     print(f"CVM Instance Created: {instance_id}")
     print(f"Security Group      : {launch_res.get('securityGroupId')} allow={launch_res.get('allowedIps')}")
+    print(f"Placement           : {launch_res.get('zone')} {launch_res.get('instanceType')}")
+    ikev2_psk = launch_res.get("ikev2Psk")
     print("Waiting for instance to be RUNNING and assign public IP...")
 
     public_ip = None
@@ -178,15 +189,22 @@ def main():
     print(f"Method           : {args.method}")
     print(f"Shadowsocks URI  : {ss_uri}")
     print(f"Subscription URL : {sub_url}")
+    print("---------- Native IKEv2 (no app) --------")
+    print(f"iPhone profile   : http://{public_ip}:8389/ikev2.mobileconfig  (open in Safari)")
+    print(f"Server / Remote ID: {public_ip}")
+    print(f"Local ID         : vpn-client")
+    print(f"Pre-shared key   : {ikev2_psk}")
     print("=========================================\n")
 
-    print("Verifying server bootstrap (waiting 20s for cloud-init)...")
-    for check in range(1, 10):
+    print("Verifying server bootstrap (cloud-init takes ~1-2 min)...")
+    for check in range(1, 31):
         time.sleep(5)
         tcp_ok = test_tcp_port(public_ip, args.port, timeout=3)
         sub_ok = test_http_sub(sub_url, timeout=3)
-        print(f"Check {check}: TCP Port {args.port}={tcp_ok}, Sub HTTP={sub_ok}")
-        if tcp_ok and sub_ok:
+        health = node_health(public_ip, timeout=3)
+        ike = ike_probe(public_ip, timeout=3)
+        print(f"Check {check}: SS TCP={tcp_ok}, Sub={sub_ok}, health={health}, IKE={ike}")
+        if tcp_ok and sub_ok and health.get("ikev2") and ike == "accepted":
             print("All services are UP and verified healthy!")
             break
 

@@ -109,6 +109,7 @@ final class SessionManager: ObservableObject {
             ),
             isDemo: isDemo
         )
+        session.ikev2PSK = ShadowsocksConfig.generatePassword(length: 24)
         currentSession = session
         persistState()
 
@@ -151,6 +152,7 @@ final class SessionManager: ObservableObject {
                         shadowsocks: session.shadowsocks,
                         sessionTag: tag,
                         securityGroupId: sgId,
+                        ikev2PSK: session.ikev2PSK ?? "",
                         credential: credential
                     )
                 } catch {
@@ -171,7 +173,7 @@ final class SessionManager: ObservableObject {
                     region: region,
                     action: "launch",
                     session: session,
-                    extra: ["allowIps": [myIP]],
+                    extra: ["allowIps": [myIP], "ikev2Psk": session.ikev2PSK ?? ""],
                     credential: credential
                 )
                 if !result.success {
@@ -182,6 +184,7 @@ final class SessionManager: ObservableObject {
                 }
                 session.securityGroupId = result.securityGroupId
                 session.allowedIPs = result.allowedIps ?? [myIP]
+                session.ikev2PSK = result.ikev2Psk ?? session.ikev2PSK
                 currentSession = session
                 persistState()
                 if let ip = result.publicIP {
@@ -223,6 +226,11 @@ final class SessionManager: ObservableObject {
                     guard var session = currentSession else { return }
                     session.publicIP = ip
                     session.shadowsocks.host = ip
+                    // Tunnelled traffic hairpinning back to the node arrives from its own public IP.
+                    if let sgId = session.securityGroupId,
+                       let allowed = try? await FirewallClient.allow(ip: ip, securityGroupId: sgId, region: region, credential: credential) {
+                        session.allowedIPs = allowed
+                    }
                     markReady(session: &session)
                     appendLog("Node is RUNNING. Assigned public IP: \(ip)")
                     return

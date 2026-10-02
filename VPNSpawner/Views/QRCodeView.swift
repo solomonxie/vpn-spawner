@@ -21,11 +21,8 @@ struct QRCodeView: View {
                         .padding()
                         .background(Color.white)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
+                        .accessibilityLabel("QR code for \(title)")
                 }
-
-                Text(title)
-                    .font(.headline)
 
                 Text(content)
                     .font(.system(.caption, design: .monospaced))
@@ -36,17 +33,20 @@ struct QRCodeView: View {
 
                 Button {
                     UIPasteboard.general.string = content
+                    Haptics.success()
                 } label: {
-                    Label("Copy URL", systemImage: "doc.on.doc")
+                    Label("Copy", systemImage: "doc.on.doc")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
                 .padding(.horizontal, 32)
 
                 Spacer()
             }
             .padding(.top, 32)
-            .navigationTitle("Shadowsocks QR")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

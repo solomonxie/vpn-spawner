@@ -1,39 +1,51 @@
 import SwiftUI
 
+/// One page: the screen is whatever state the session is in.
 struct ContentView: View {
     @StateObject private var manager = SessionManager()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TabView {
-            NavigationStack {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        if let session = manager.currentSession {
-                            SessionCardView(manager: manager, session: session)
-                        } else {
-                            LaunchCardView(manager: manager)
-                        }
+        NavigationStack {
+            Group {
+                if let session = manager.currentSession {
+                    switch session.status {
+                    case .ready:
+                        ReadyView(manager: manager, session: session)
+                    case .stopping:
+                        StoppingView(manager: manager, session: session)
+                    case .failed:
+                        FailedView(manager: manager, session: session)
+                    default:
+                        ProvisioningView(manager: manager, session: session)
                     }
-                    .padding()
-                }
-                .navigationTitle("VPN Spawner")
-                .refreshable {
-                    await manager.reconcileSession()
+                } else {
+                    IdleView(manager: manager)
                 }
             }
-            .tabItem {
-                Label("Session", systemImage: "bolt.shield")
+            .animation(.default, value: manager.currentSession?.status)
+            .scrollDismissesKeyboard(.immediately)
+            .navigationTitle("VPN Spawner")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable {
+                await manager.resume()
+                await manager.reconcileSession()
             }
-
-            HistoryView(manager: manager)
-                .tabItem {
-                    Label("History", systemImage: "clock.arrow.circlepath")
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await manager.resume() }
                 }
-
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView(manager: manager)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
                 }
+            }
         }
     }
 }

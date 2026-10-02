@@ -136,15 +136,63 @@ enum FirewallClient {
 }
 
 enum PublicIPService {
+    /// Mixes global and China-reachable services: ipify is often unreachable through a China exit.
+    private static let sources = [
+        "https://api.ipify.org",
+        "https://ip.3322.net",
+        "https://myip.ipip.net",
+        "https://checkip.amazonaws.com",
+    ]
+    static let browserCheckURL = URL(string: "https://myip.ipip.net")!
+
     static func current() async throws -> String {
-        for urlString in ["https://api.ipify.org", "https://checkip.amazonaws.com"] {
+        for urlString in sources {
             guard let url = URL(string: urlString) else { continue }
-            if let (data, _) = try? await URLSession.shared.data(from: url),
-               let ip = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !ip.isEmpty {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5
+            if let (data, _) = try? await URLSession.shared.data(for: request),
+               let body = String(data: data, encoding: .utf8),
+               let ip = firstIPv4(in: body) {
                 return ip
             }
         }
         throw CloudAPIError.badResponse("Could not detect current public IP")
+    }
+
+    private static func firstIPv4(in text: String) -> String? {
+        guard let range = text.range(of: #"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, options: .regularExpression) else { return nil }
+        return String(text[range])
+    }
+}
+
+/// The node's own /health (reachable because the phone's IP is allowlisted).
+enum NodeHealth {
+    struct Status: Decodable {
+        let ready: Bool?
+        let protocols: [String: Bool]?
+        let shadowsocks: Bool?
+        let ikev2: Bool?
+        let ipsec_backend: Bool?
+
+        /// Nodes report `ready` once every requested protocol is up; older nodes only the three flags.
+        var isReady: Bool { ready ?? (shadowsocks == true && ikev2 == true && ipsec_backend == true) }
+    }
+
+    /// Connection details for every enabled protocol (node's /client.json).
+    static func endpoints(ip: String) async -> [NodeEndpoint]? {
+        guard let url = URL(string: "http://\(ip):8389/client.json") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 6
+        struct Body: Decodable { let endpoints: [NodeEndpoint] }
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return try? JSONDecoder().decode(Body.self, from: data).endpoints
+    }
+
+    static func check(ip: String) async -> Status? {
+        guard let url = URL(string: "http://\(ip):8389/health") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return try? JSONDecoder().decode(Status.self, from: data)
     }
 }

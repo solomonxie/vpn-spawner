@@ -9,9 +9,13 @@ struct ControllerInvocationResult: Decodable {
     let securityGroupId: String?
     let allowedIps: [String]?
     let ikev2Psk: String?
+    var replaced: [String]? = nil
 }
 
 enum FunctionClient {
+    /// Where the controller function is deployed (terraform var.region); it manages any region.
+    static let functionRegion = CloudCredentialConfig.defaultRegion
+
     private static let host = "scf.tencentcloudapi.com"
     private static let service = "scf"
     private static let version = "2018-04-16"
@@ -51,21 +55,28 @@ enum FunctionClient {
             "ClientContext": clientContextString,
         ]
 
-        let data = try await CloudAPIClient.request(
-            host: host,
-            service: service,
-            action: "InvokeFunction",
-            version: version,
-            region: region,
-            payload: payload,
-            credential: credential
-        )
+        let data: Data
+        do {
+            data = try await CloudAPIClient.request(
+                host: host,
+                service: service,
+                action: "Invoke",
+                version: version,
+                region: functionRegion,
+                payload: payload,
+                credential: credential
+            )
+        } catch CloudAPIError.api(let code, _) where code.contains("ResourceNotFound") {
+            throw CloudAPIError.badResponse(
+                "Cloud function \"\(functionName)\" isn't deployed in \(functionRegion). Use Settings → Runs from → This iPhone."
+            )
+        }
 
         struct SCFInvokeResponse: Decodable {
             struct Result: Decodable {
                 let RetMsg: String?
                 let FunctionRequestId: String?
-                let ErrorMessage: String?
+                let ErrMsg: String?
             }
             struct Body: Decodable {
                 let Result: Result?
@@ -74,7 +85,7 @@ enum FunctionClient {
         }
 
         let decoded = try JSONDecoder().decode(SCFInvokeResponse.self, from: data)
-        if let errMsg = decoded.Response.Result?.ErrorMessage, !errMsg.isEmpty {
+        if let errMsg = decoded.Response.Result?.ErrMsg, !errMsg.isEmpty {
             throw CloudAPIError.api(code: "ControllerError", message: errMsg)
         }
 

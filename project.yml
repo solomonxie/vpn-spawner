@@ -16,6 +16,17 @@ targets:
           - "**/README.md"
       - path: controller/bootstrap.sh
         buildPhase: resources
+    entitlements:
+      path: VPNSpawner/VPNSpawner.entitlements
+      properties:
+        com.apple.developer.networking.vpn.api:
+          - allow-vpn
+    info:
+      path: VPNSpawner/Info.plist
+      properties:
+        # Nodes are reached by bare IP over HTTP (/health, /sub, profile); no TLS possible.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     configFiles:
       Debug: Config/Local.xcconfig
       Release: Config/Local.xcconfig

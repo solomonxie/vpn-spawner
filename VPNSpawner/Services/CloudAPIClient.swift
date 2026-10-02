@@ -49,6 +49,8 @@ enum CloudAPIClient {
         }
 
         var urlRequest = URLRequest(url: url)
+        // Fail fast instead of hanging 60s when traffic is stuck in a dying VPN tunnel.
+        urlRequest.timeoutInterval = 15
         urlRequest.httpMethod = "POST"
         urlRequest.httpBody = body
         for (key, value) in CloudSigner.headers(

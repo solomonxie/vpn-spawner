@@ -39,6 +39,19 @@ enum CloudVendor: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    static func flag(_ region: String) -> String {
+        switch region {
+        case "ap-hongkong", "ap-east-1": return "🇭🇰"
+        case "ap-tokyo", "ap-northeast-1": return "🇯🇵"
+        case "ap-singapore", "ap-southeast-1": return "🇸🇬"
+        case "ca-central-1": return "🇨🇦"
+        case "eu-central-1": return "🇩🇪"
+        case let r where r.hasPrefix("us-"): return "🇺🇸"
+        case let r where r.hasPrefix("ap-"): return "🇨🇳"
+        default: return "🌐"
+        }
+    }
+
     static func regionName(_ id: String) -> String {
         allCases.lazy.compactMap { vendor in vendor.regions.first { $0.id == id }?.name }.first ?? id
     }

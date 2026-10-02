@@ -18,33 +18,20 @@ struct ReadyView: View {
     var body: some View {
         List {
             Section {
-                hero
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            }
-
-            if !session.isDemo && hasIKEv2 {
-                Section { connectRow } footer: { connectFooter }
-            }
-
-            // Red text, iOS's signal for a destructive secondary action: findable right under
-            // Connect without competing with it; the confirmation guards against slips.
-            Section {
-                Button(role: .destructive) {
-                    confirmStop = true
-                } label: {
-                    VStack(spacing: 2) {
-                        Text("Stop")
-                            .font(.body.weight(.semibold))
-                        Text("Destroys the server and its firewall")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderless)
-                .disabled(manager.isOperating)
+                ControlHub(
+                    manager: manager,
+                    nativeVPN: nativeVPN,
+                    session: session,
+                    canConnect: !session.isDemo && hasIKEv2,
+                    toast: $toast,
+                    confirmStop: $confirmStop
+                )
                 .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            } footer: {
+                connectFooter
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
             }
 
             Section {
@@ -111,76 +98,7 @@ struct ReadyView: View {
         }
     }
 
-    // MARK: Hero
-
-    private var hero: some View {
-        VStack(spacing: 18) {
-            HStack(spacing: 8) {
-                StatusPill(text: "Ready", color: .green)
-                if session.isDemo { DemoBadge() }
-            }
-            CountdownRing(session: session)
-            Button {
-                UIPasteboard.general.string = ip
-                Haptics.success()
-                toast = "Copied IP"
-            } label: {
-                Text("\(IdleView.regionName(session.region)) · \(ip)")
-                    .font(.subheadline.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Copies the server IP")
-
-            Menu {
-                Button("+10 minutes") { Task { await manager.extendSession(minutes: 10) } }
-                Button("+30 minutes") { Task { await manager.extendSession(minutes: 30) } }
-                Button("+60 minutes") { Task { await manager.extendSession(minutes: 60) } }
-            } label: {
-                Label("Extend", systemImage: "plus")
-                    .font(.subheadline.weight(.medium))
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: Connect
-
-    private var isConnectedHere: Bool { nativeVPN.isActive && nativeVPN.isInstalled(for: ip) }
-
-    private var connectRow: some View {
-        Button {
-            Task {
-                if isConnectedHere {
-                    nativeVPN.disconnect()
-                } else if let psk = session.ikev2PSK {
-                    await nativeVPN.connect(server: ip, psk: psk, name: "VPN Spawner \(IdleView.regionName(session.region))")
-                }
-            }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "power")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(isConnectedHere ? Color.green : Color.accentColor, in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isConnectedHere ? "Disconnect" : "Connect")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(nativeVPN.isInstalled(for: ip) ? nativeVPN.statusText : "IKEv2 · built into iOS")
-                        .font(.subheadline)
-                        .foregroundStyle(isConnectedHere ? .green : .secondary)
-                }
-                Spacer()
-            }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
 
     @ViewBuilder
     private var connectFooter: some View {
@@ -260,36 +178,6 @@ struct ReadyView: View {
 }
 
 /// Thin ring that empties as the session's time runs out.
-struct CountdownRing: View {
-    let session: SessionRecord
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            let low = session.remainingTime < 120
-            ZStack {
-                Circle()
-                    .stroke(.fill.tertiary, lineWidth: 6)
-                Circle()
-                    .trim(from: 0, to: 1 - session.progress)
-                    .stroke(low ? Color.orange : Color.accentColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .animation(.linear(duration: 1), value: session.progress)
-                VStack(spacing: 2) {
-                    Text(session.formattedRemainingTime)
-                        .font(.system(size: 40, weight: .light, design: .rounded).monospacedDigit())
-                        .contentTransition(.numericText())
-                    Text("left")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 170, height: 170)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(session.formattedRemainingTime) left")
-        }
-    }
-}
-
 struct QRItem: Identifiable {
     let content: String
     let title: String

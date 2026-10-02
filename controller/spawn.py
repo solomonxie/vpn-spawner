@@ -69,7 +69,9 @@ def main():
     parser.add_argument("--secret-key", default=os.environ.get("TENCENTCLOUD_SECRET_KEY"), help="Tencent Cloud SecretKey")
     parser.add_argument("--port", type=int, default=8388, help="Shadowsocks port")
     parser.add_argument("--method", default="chacha20-ietf-poly1305", help="Cipher method")
-    parser.add_argument("--keep", action="store_true", help="Keep instance running instead of cleaning up")
+    parser.add_argument("--keep", action="store_true", help="Don't wait for ENTER; leave the node to its cloud-side timer")
+    parser.add_argument("--minutes", type=int, default=10, help="Tencent terminates the node itself after this many minutes (min ~6)")
+    parser.add_argument("--extend", metavar="INSTANCE_ID", help="Reschedule a node's self-destruct to --minutes from now")
     parser.add_argument("--terminate", metavar="INSTANCE_ID", help="Terminate a specific instance and its security group")
     parser.add_argument("--allow-ip", action="append", default=[], help="IP allowed to reach the node (repeatable; default: current public IP)")
     parser.add_argument("--add-ip", metavar="INSTANCE_ID", help="Add --allow-ip (or current public IP) to a running node's allowlist")
@@ -82,6 +84,14 @@ def main():
         print("ERROR: Tencent Cloud credentials required.")
         print("Provide via --secret-id and --secret-key, or set TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY in environment or .env file.")
         sys.exit(1)
+
+    if args.extend:
+        resp = main_handler({"ClientContext": {
+            "action": "extend", "region": args.region, "instanceId": args.extend,
+            "durationMinutes": args.minutes, "secretId": secret_id, "secretKey": secret_key,
+        }}, None)
+        print("extend:", resp)
+        return
 
     if args.add_ip:
         ips = args.allow_ip or [current_public_ip()]
@@ -130,6 +140,7 @@ def main():
         "secretId": secret_id,
         "secretKey": secret_key,
         "allowIps": allow_ips,
+        "durationMinutes": args.minutes,
         "shadowsocks": {
             "port": args.port,
             "password": password,
@@ -147,6 +158,7 @@ def main():
     print(f"CVM Instance Created: {instance_id}")
     print(f"Security Group      : {launch_res.get('securityGroupId')} allow={launch_res.get('allowedIps')}")
     print(f"Placement           : {launch_res.get('zone')} {launch_res.get('instanceType')}")
+    print(f"Self-destruct (UTC) : {launch_res.get('terminateAt')}  (Tencent-side; survives this script)")
     ikev2_psk = launch_res.get("ikev2Psk")
     print("Waiting for instance to be RUNNING and assign public IP...")
 
@@ -204,7 +216,7 @@ def main():
         health = node_health(public_ip, timeout=3)
         ike = ike_probe(public_ip, timeout=3)
         print(f"Check {check}: SS TCP={tcp_ok}, Sub={sub_ok}, health={health}, IKE={ike}")
-        if tcp_ok and sub_ok and health.get("ikev2") and ike == "accepted":
+        if tcp_ok and sub_ok and health.get("ikev2") and health.get("ipsec_backend") and ike == "accepted":
             print("All services are UP and verified healthy!")
             break
 
@@ -223,8 +235,9 @@ def main():
         print("Teardown result:", term_res)
         print("Cleanup verified.")
     else:
-        print(f"\n[KEEP] Instance {instance_id} is running. Remember to terminate later:")
+        print(f"\n[KEEP] Instance {instance_id} is running; Tencent terminates it at {launch_res.get('terminateAt')} UTC. Sooner:")
         print(f"venv/bin/python controller/spawn.py --region {args.region} --terminate {instance_id}")
+        print(f"venv/bin/python controller/spawn.py --region {args.region} --extend {instance_id} --minutes 30")
         print("If your IP changes:")
         print(f"venv/bin/python controller/spawn.py --region {args.region} --add-ip {instance_id}")
 

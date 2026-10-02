@@ -2,7 +2,9 @@ import json
 import os
 import re
 import base64
+import gzip
 import secrets
+from datetime import datetime, timedelta, timezone
 from tencentcloud.common import credential
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
@@ -12,8 +14,14 @@ except ImportError:
     from controller import firewall
 
 def get_credential(secret_id=None, secret_key=None):
-    s_id = secret_id or os.environ.get("TENCENTCLOUD_SECRET_ID")
-    s_key = secret_key or os.environ.get("TENCENTCLOUD_SECRET_KEY")
+    if secret_id and secret_key:
+        return credential.Credential(secret_id, secret_key)
+    # On SCF the execution role's temporary key arrives under these names (no underscore before ID/KEY).
+    if os.environ.get("TENCENTCLOUD_SESSIONTOKEN"):
+        return credential.Credential(os.environ["TENCENTCLOUD_SECRETID"], os.environ["TENCENTCLOUD_SECRETKEY"],
+                                     os.environ["TENCENTCLOUD_SESSIONTOKEN"])
+    s_id = os.environ.get("TENCENTCLOUD_SECRET_ID")
+    s_key = os.environ.get("TENCENTCLOUD_SECRET_KEY")
     if s_id and s_key:
         return credential.Credential(s_id, s_key)
     return credential.EnvironmentVariableCredential().get_credential()
@@ -32,19 +40,21 @@ def instance_firewall(client, fw_client, instance_id):
             return sg_id
     return None
 
-INSTANCE_TYPES = ["SA2.MEDIUM2", "S5.MEDIUM2", "SA3.MEDIUM2", "SA5.MEDIUM2", "S6.MEDIUM2"]
+def is_small_x86(q):
+    # The Ubuntu image is x86_64; ARM families (Ampere, Kunpeng, Yitian) can't boot it.
+    return any(v in (q.CpuType or "") for v in ("Intel", "AMD")) and 1 <= q.Cpu <= 2 and q.Memory >= 1
 
 def resolve_placement(client, region):
-    """Cheapest (zone, instance type) currently on sale, hourly billing."""
+    """Cheapest small x86 (zone, instance type) currently on sale, hourly billing."""
     req = models.DescribeZoneInstanceConfigInfosRequest()
     req.from_json_string(json.dumps({"Filters": [
         {"Name": "instance-charge-type", "Values": ["POSTPAID_BY_HOUR"]},
-        {"Name": "instance-type", "Values": INSTANCE_TYPES},
     ]}))
-    on_sale = [q for q in client.DescribeZoneInstanceConfigInfos(req).InstanceTypeQuotaSet if q.Status == "SELL"]
+    on_sale = [q for q in client.DescribeZoneInstanceConfigInfos(req).InstanceTypeQuotaSet
+               if q.Status == "SELL" and q.Price and q.Price.UnitPrice and is_small_x86(q)]
     if not on_sale:
-        raise RuntimeError(f"None of {INSTANCE_TYPES} on sale in {region}")
-    best = min(on_sale, key=lambda q: q.Price.UnitPrice)
+        raise RuntimeError(f"No small x86 instance type on sale in {region}")
+    best = min(on_sale, key=lambda q: (q.Price.UnitPrice, q.Cpu, q.Memory, q.InstanceType))
     return best.Zone, best.InstanceType
 
 def resolve_image(client, region):
@@ -68,7 +78,17 @@ def resolve_image(client, region):
 BOOTSTRAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bootstrap.sh")
 SAFE_VALUE = re.compile(r"^[A-Za-z0-9+/=_.:-]+$")
 
-def build_user_data(shadowsocks, ikev2_psk):
+PROTOCOLS = ["ikev2", "shadowsocks", "ss_obfs", "ss2022", "vless_reality", "vmess_ws", "trojan", "hysteria2", "wireguard"]
+DEFAULT_PROTOCOLS = ["ikev2", "shadowsocks"]
+
+def normalize_protocols(requested):
+    requested = requested or DEFAULT_PROTOCOLS
+    unknown = set(requested) - set(PROTOCOLS)
+    if unknown:
+        raise ValueError(f"Unknown protocols: {sorted(unknown)}")
+    return [p for p in PROTOCOLS if p in requested]
+
+def build_user_data(shadowsocks, ikev2_psk, protocols=None):
     values = {
         "SS_PORT": str(int(shadowsocks.get("port", 8388))),
         "SS_PASSWORD": shadowsocks.get("password", ""),
@@ -76,15 +96,71 @@ def build_user_data(shadowsocks, ikev2_psk):
         "TAG": shadowsocks.get("tag", "Tencent-Ephemeral"),
         "IKEV2_PSK": ikev2_psk,
     }
-    script = open(BOOTSTRAP).read()
+    script = open(BOOTSTRAP).read().replace("{{PROTOCOLS}}", ",".join(normalize_protocols(protocols)))
     for key, value in values.items():
         if not SAFE_VALUE.match(value):
             raise ValueError(f"{key} has characters unsafe for the bootstrap script")
         script = script.replace("{{" + key + "}}", value)
-    return base64.b64encode(script.encode("utf-8")).decode("utf-8")
+    # Tencent caps UserData at 16 KB (base64); cloud-init decompresses gzip user-data itself.
+    return base64.b64encode(gzip.compress(script.encode("utf-8"), mtime=0)).decode("utf-8")
+
+DEFAULT_MINUTES = 10
+MIN_TIMER_LEAD = timedelta(minutes=6)  # Tencent requires ActionTime > now + 5 min
+
+def timer_time(expires_at):
+    """Cloud-side self-destruct time: never sooner than Tencent allows."""
+    at = max(expires_at, datetime.now(timezone.utc) + MIN_TIMER_LEAD)
+    return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def expiry_from(req):
+    if req.get("expiryTimestamp"):
+        return datetime.fromtimestamp(int(req["expiryTimestamp"]), timezone.utc)
+    return datetime.now(timezone.utc) + timedelta(minutes=int(req.get("durationMinutes", DEFAULT_MINUTES)))
+
+def terminate_timers(client, instance_id):
+    req = models.DescribeInstancesActionTimerRequest()
+    req.InstanceIds = [instance_id]
+    # Re-check InstanceId: an ignored filter once returned (and let us delete) other instances' timers.
+    return [t for t in client.DescribeInstancesActionTimer(req).ActionTimers or []
+            if t.InstanceId == instance_id and t.TimerAction == "TerminateInstances" and t.Status in ("UNDO", None)]
+
+def reschedule_terminate(client, instance_id, expires_at):
+    old = [t.ActionTimerId for t in terminate_timers(client, instance_id)]
+    if old:
+        req = models.DeleteInstancesActionTimerRequest()
+        req.ActionTimerIds = old
+        client.DeleteInstancesActionTimer(req)
+    req = models.ImportInstancesActionTimerRequest()
+    req.from_json_string(json.dumps({"InstanceIds": [instance_id], "ActionTimer": {
+        "TimerAction": "TerminateInstances", "ActionTime": timer_time(expires_at)}}))
+    client.ImportInstancesActionTimer(req)
+    return timer_time(expires_at)
+
+NODE_NAME = "vpn-spawner-node"
+
+def replace_running_nodes(client):
+    """One node at a time: terminate any managed instance still alive before launching another."""
+    req = models.DescribeInstancesRequest()
+    req.from_json_string(json.dumps({"Filters": [{"Name": "tag:ManagedBy", "Values": ["VPNSpawner"]}], "Limit": 100}))
+    alive = [i.InstanceId for i in client.DescribeInstances(req).InstanceSet or []
+             if i.InstanceState not in ("TERMINATING", "SHUTDOWN", "LAUNCH_FAILED")]
+    if alive:
+        term = models.TerminateInstancesRequest()
+        term.InstanceIds = alive
+        client.TerminateInstances(term)
+    return alive
+
+def find_by_session(client, session_id):
+    req = models.DescribeInstancesRequest()
+    req.from_json_string(json.dumps({"Filters": [
+        {"Name": "tag:SessionId", "Values": [session_id]},
+        {"Name": "tag:ManagedBy", "Values": ["VPNSpawner"]},
+    ]}))
+    return client.DescribeInstances(req).InstanceSet or []
 
 def main_handler(event, context):
-    ctx_raw = event.get("ClientContext", "{}")
+    # SCF's Invoke API delivers ClientContext as the event itself; local callers wrap it.
+    ctx_raw = event.get("ClientContext", event)
     if isinstance(ctx_raw, str):
         try:
             req = json.loads(ctx_raw)
@@ -109,23 +185,28 @@ def main_handler(event, context):
             return {"success": False, "message": "allowIps is required"}
         shadowsocks = req.get("shadowsocks", {})
         ikev2_psk = req.get("ikev2Psk") or secrets.token_urlsafe(18)
-        user_data = build_user_data(shadowsocks, ikev2_psk)
+        protocols = normalize_protocols(req.get("protocols"))
+        user_data = build_user_data(shadowsocks, ikev2_psk, protocols)
         zone, instance_type = resolve_placement(client, region)
         image_id = resolve_image(client, region)
+        replaced = replace_running_nodes(client) if req.get("replaceExisting", True) else []
         try:
             firewall.sweep_orphans(fw_client)
         except Exception:
             pass
         sg_id = firewall.create(fw_client, session_id, allow_ips)
+        expires_at = expiry_from(req)
 
         cvm_req = models.RunInstancesRequest()
         cvm_req.Placement = {"Zone": zone}
         cvm_req.InstanceType = instance_type
         cvm_req.ImageId = image_id
         cvm_req.InstanceChargeType = "POSTPAID_BY_HOUR"
-        cvm_req.InstanceName = f"vpn-{session_id}"
+        cvm_req.InstanceName = NODE_NAME
         cvm_req.UserData = user_data
         cvm_req.SecurityGroupIds = [sg_id]
+        # Survives any client crash: Tencent terminates the instance itself at expiry.
+        cvm_req.ActionTimer = {"TimerAction": "TerminateInstances", "ActionTime": timer_time(expires_at)}
         cvm_req.InternetAccessible = {
             "InternetChargeType": "TRAFFIC_POSTPAID_BY_HOUR",
             "InternetMaxBandwidthOut": 30,
@@ -152,8 +233,24 @@ def main_handler(event, context):
             "instanceType": instance_type,
             "allowedIps": firewall.allowed_ips(fw_client, sg_id),
             "ikev2Psk": ikev2_psk,
+            "protocols": protocols,
+            "replaced": replaced,
+            "terminateAt": timer_time(expires_at),
             "status": "provisioning"
         }
+
+    elif action == "extend":
+        instance_id = req.get("instanceId", "")
+        return {"success": True, "instanceId": instance_id,
+                "terminateAt": reschedule_terminate(client, instance_id, expiry_from(req))}
+
+    elif action == "find":
+        found = find_by_session(client, session_id)
+        return {"success": True, "instances": [{
+            "instanceId": i.InstanceId, "status": i.InstanceState,
+            "publicIP": (i.PublicIpAddresses or [None])[0],
+            "securityGroupIds": i.SecurityGroupIds or [],
+        } for i in found]}
 
     elif action == "allow_ip":
         ip = req.get("ip", "")

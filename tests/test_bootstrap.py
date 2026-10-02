@@ -1,4 +1,5 @@
 import base64
+import gzip
 import os
 import re
 import socket
@@ -13,7 +14,7 @@ from controller import app, ike_probe
 
 
 def render(**ss):
-    return base64.b64decode(app.build_user_data({"password": "pw+/=", **ss}, "psk_x-1")).decode()
+    return gzip.decompress(base64.b64decode(app.build_user_data({"password": "pw+/=", **ss}, "psk_x-1"))).decode()
 
 
 def test_all_placeholders_filled():
@@ -57,3 +58,28 @@ def test_probe_none_without_responder():
     port = s.getsockname()[1]
     s.close()
     assert ike_probe.probe("127.0.0.1", port, timeout=1) is None
+
+
+def test_protocols_filled_in_canonical_order():
+    script = gzip.decompress(base64.b64decode(app.build_user_data({"password": "pw"}, "psk", ["trojan", "ikev2"]))).decode()
+    assert "PROTOCOLS='ikev2,trojan'" in script
+
+
+def test_default_protocols():
+    script = render()
+    assert "PROTOCOLS='ikev2,shadowsocks'" in script
+
+
+def test_unknown_protocol_rejected():
+    with pytest.raises(ValueError):
+        app.build_user_data({"password": "pw"}, "psk", ["ikev2", "$(reboot)"])
+
+
+def test_embedded_python_compiles():
+    script = open(app.BOOTSTRAP).read()
+    for block in script.split("<<'PYEOF'\n")[1:]:
+        compile(block.split("\nPYEOF")[0], "embedded.py", "exec")
+
+
+def test_all_protocols_fit_tencent_userdata_limit():
+    assert len(app.build_user_data({"password": "pw"}, "psk", app.PROTOCOLS)) < 16 * 1024

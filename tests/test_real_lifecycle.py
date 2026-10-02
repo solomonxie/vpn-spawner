@@ -9,9 +9,12 @@ import urllib.request
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from controller.app import main_handler
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from controller.app import main_handler, get_client, terminate_timers
 from controller.spawn import load_dotenv, current_public_ip
 from controller.ike_probe import probe as ike_probe
+from controller.app import PROTOCOLS
+from proxy_client import exit_ip_via
 
 load_dotenv()
 
@@ -39,7 +42,7 @@ def test_real_server_provisioning_and_teardown():
     session_id = f"test-ci-{int(time.time()) % 10000}"
 
     print(f"\n[TEST] Launching real CVM in {REGION}, allow={my_ip}")
-    launch = invoke("launch", sessionId=session_id, allowIps=[my_ip], shadowsocks={
+    launch = invoke("launch", sessionId=session_id, allowIps=[my_ip], replaceExisting=False, durationMinutes=10, protocols=PROTOCOLS, shadowsocks={
         "port": 8388,
         "password": base64.b64encode(os.urandom(12)).decode("ascii"),
         "method": "chacha20-ietf-poly1305",
@@ -52,6 +55,7 @@ def test_real_server_provisioning_and_teardown():
     assert launch["allowedIps"] == [my_ip], "Firewall must admit only the caller's IP"
     psk = launch["ikev2Psk"]
     assert psk
+    assert launch["terminateAt"], "Launch must schedule a cloud-side terminate"
     print(f"[TEST] Instance {instance_id}, security group {sg_id}")
 
     try:
@@ -68,29 +72,54 @@ def test_real_server_provisioning_and_teardown():
 
         base = f"http://{public_ip}:8389"
         health = {}
-        for check in range(1, 40):
+        for check in range(1, 60):
             time.sleep(5)
             try:
                 health = json.loads(fetch(f"{base}/health"))
-                if health.get("shadowsocks") and health.get("ikev2"):
+                if health.get("ready"):
                     print(f"[TEST] Node healthy on check {check}: {health}")
                     break
                 print(f"[TEST] Check {check}: {health}")
             except Exception as e:
                 print(f"[TEST] Check {check}: {e}")
-        assert health.get("shadowsocks") and health.get("ikev2"), f"Node not healthy: {health}"
+        assert health.get("ready"), f"Node not healthy: {health}"
+        assert not health.get("unavailable"), f"Protocols unavailable on node: {health['unavailable']}"
+        assert set(health["protocols"]) == set(PROTOCOLS), f"Missing protocols: {health['protocols']}"
 
         feed = base64.b64decode(fetch(f"{base}/sub")).decode()
-        assert feed.startswith("ss://"), "Subscription feed must carry an ss:// URI"
+        assert {l.split("://")[0] for l in feed.split()} == {"ss", "vless", "vmess", "trojan", "hysteria2"}, feed[:200]
 
         profile = plistlib.loads(fetch(f"{base}/ikev2.mobileconfig"))
         ikev2 = profile["PayloadContent"][0]["IKEv2"]
         assert ikev2["RemoteAddress"] == public_ip and ikev2["RemoteIdentifier"] == public_ip
         assert ikev2["SharedSecret"] == psk and ikev2["AuthenticationMethod"] == "SharedSecret"
 
+        endpoints = json.loads(fetch(f"{base}/client.json"))["endpoints"]
+        failures = {}
+        for ep in endpoints:
+            if ep["proto"] == "ikev2":
+                continue
+            seen, why = exit_ip_via(ep, public_ip)
+            print(f"[TEST] {ep['proto']:14} exit IP {seen} {'OK' if seen == public_ip else why}")
+            if seen != public_ip:
+                failures[ep["proto"]] = seen or why
+        assert not failures, f"Protocols not tunnelling through the node: {failures}"
+
         ike = ike_probe(public_ip)
         assert ike == "accepted", f"IKEv2 responder did not accept the iOS default proposal: {ike}"
         print("[TEST] IKEv2 IKE_SA_INIT accepted (AES-256/SHA2-256/DH14)")
+
+        timers = terminate_timers(get_client(REGION, SECRET_ID, SECRET_KEY), instance_id)
+        assert [t.ActionTime for t in timers], "Tencent has no terminate timer for the instance"
+        print(f"[TEST] Cloud self-destruct scheduled: {[t.ActionTime for t in timers]}")
+
+        extended = invoke("extend", instanceId=instance_id, durationMinutes=30)
+        assert extended.get("success") and extended["terminateAt"] > launch["terminateAt"], f"extend failed: {extended}"
+        timers = terminate_timers(get_client(REGION, SECRET_ID, SECRET_KEY), instance_id)
+        assert len(timers) == 1, f"Extend must replace, not add, the timer: {[t.ActionTime for t in timers]}"
+
+        found = invoke("find", sessionId=session_id)
+        assert [i["instanceId"] for i in found["instances"]] == [instance_id], "find-by-session must recover the instance"
 
         added = invoke("allow_ip", instanceId=instance_id, ip=EXTRA_IP)
         assert added.get("success") is True, f"allow_ip failed: {added}"

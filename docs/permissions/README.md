@@ -12,6 +12,8 @@ Verified by a passing `tests/test_real_lifecycle.py` run.
 | Firewall | CreateSecurityGroup (+Tags), CreateSecurityGroupPolicies | `cvm:CreateSecurityGroup`, `vpc:CreateSecurityGroupPolicies`, `tag:*Resource*` |
 | Launch | RunInstances (SecurityGroupIds, TagSpecification) | `cvm:RunInstances`, `finance:trade` |
 | Poll | DescribeInstances | `cvm:DescribeInstances` |
+| Self-destruct | RunInstances ActionTimer, Import/Delete/DescribeInstancesActionTimer | `cvm:*InstancesActionTimer` |
+| Cloud function | Invoke (app key), role SCF_VPNSpawner (same policy) | `scf:InvokeFunction` on that function only |
 | Add IP | DescribeSecurityGroupPolicies, CreateSecurityGroupPolicies | `cvm:DescribeSecurityGroupPolicys` (sic) |
 | Teardown | TerminateInstances, DeleteSecurityGroup | tag-scoped to `ManagedBy=VPNSpawner` |
 

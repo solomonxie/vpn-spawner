@@ -7,7 +7,6 @@ struct SettingsView: View {
     @State private var showSecretKey = false
     @State private var pasteMode = false
     @State private var pasteBuffer = ""
-    @State private var showCredentialInfo = false
     @State private var test: (ok: Bool, text: String)?
     @State private var isTesting = false
     @State private var loaded = false
@@ -114,23 +113,8 @@ struct SettingsView: View {
                 Label("Permissions this key needs", systemImage: "key.viewfinder")
             }
         } header: {
-            HStack(spacing: 6) {
-                Text("Tencent Cloud")
-                Button {
-                    showCredentialInfo = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-                .accessibilityLabel("About these keys")
-                .popover(isPresented: $showCredentialInfo) {
-                    Text("Use the vpn-spawner sub-user's key, not your root key. It can only create and delete servers this app tagged.\n\nStored in this iPhone's Keychain and sent only to Tencent Cloud's API.")
-                        .font(.callout)
-                        .padding()
-                        .frame(idealWidth: 300)
-                        .presentationCompactAdaptation(.popover)
-                }
+            HStack {
+                Text("Access key")
                 Spacer()
                 Button(pasteMode ? "Back to fields" : "Paste credentials") {
                     pasteBuffer = ""
@@ -258,16 +242,12 @@ struct SettingsView: View {
 
     /// One account form at a time; same segmented style as Runs from.
     private var accountPickerSection: some View {
-        Section {
+        Section("Cloud account") {
             Picker("Cloud account", selection: $accountVendor) {
                 ForEach(CloudVendor.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding(.vertical, 4)
-        } header: {
-            Text("Cloud account")
-        } footer: {
-            Text("Add the key for each cloud you launch on. The launch screen picks which cloud to use.")
         }
     }
 

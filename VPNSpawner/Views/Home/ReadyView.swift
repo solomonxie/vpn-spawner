@@ -88,8 +88,8 @@ struct ReadyView: View {
         .sheet(item: $qr) { item in
             QRCodeView(content: item.content, title: item.title)
         }
-        .confirmationDialog("Stop this server?", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("Stop", role: .destructive) {
+        .confirmationDialog("Destroy this server?", isPresented: $confirmStop, titleVisibility: .visible) {
+            Button("Destroy", role: .destructive) {
                 Task { await manager.terminateSession() }
             }
             Button("Cancel", role: .cancel) {}

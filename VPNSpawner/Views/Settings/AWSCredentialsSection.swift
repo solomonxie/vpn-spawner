@@ -74,7 +74,7 @@ struct AWSCredentialsSection: View {
             }
         } header: {
             HStack {
-                Text("AWS")
+                Text("Access key")
                 Spacer()
                 Button(pasteMode ? "Back to fields" : "Paste credentials") {
                     pasteBuffer = ""
@@ -87,7 +87,7 @@ struct AWSCredentialsSection: View {
             if let test {
                 Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
             } else {
-                Text("AWS always runs from its cloud function, so this key only needs permission to call it. Stored in this iPhone's Keychain.")
+                Text("Only needs permission to call the function. Kept in Keychain.")
             }
         }
         .onAppear {

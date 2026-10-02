@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// Top of the ready screen: location chip, the countdown ring as a big power control,
-/// status + time left, then Extend and Stop side by side.
+/// status + time left, then Extend and Destroy side by side.
+/// Every button here is borderless/plain: in a List row, default-style buttons make the whole
+/// row one tap target, so tapping the countdown would have fired Destroy.
 struct ControlHub: View {
     @ObservedObject var manager: SessionManager
     @ObservedObject var nativeVPN: NativeVPNController
@@ -131,14 +133,16 @@ struct ControlHub: View {
                 } label: {
                     pill("Extend", systemImage: "plus", tint: .accentColor)
                 }
+                .menuStyle(.borderlessButton)
                 Button(role: .destructive) {
                     confirmStop = true
                 } label: {
-                    pill("Stop", systemImage: "stop.fill", tint: .red)
+                    pill("Destroy", systemImage: "trash", tint: .red)
                 }
+                .buttonStyle(.borderless)
                 .disabled(manager.isOperating)
             }
-            Text("Stop destroys the server and its firewall")
+            Text("Destroy deletes the server and its firewall")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

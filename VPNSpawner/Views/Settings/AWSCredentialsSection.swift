@@ -5,9 +5,7 @@ struct AWSCredentialsSection: View {
     @Binding var vendor: CloudVendor
     @State private var config = AWSCredentialConfig()
     @State private var secret = ""
-    @State private var showSecret = false
-    @State private var pasteMode = false
-    @State private var pasteBuffer = ""
+    @State private var pasteNote: String?
     @State private var loaded = false
     @State private var test: (ok: Bool, text: String)?
     @State private var isTesting = false
@@ -15,51 +13,23 @@ struct AWSCredentialsSection: View {
     var body: some View {
         Section {
             VendorPicker(selection: $vendor)
-            if pasteMode {
-                TextEditor(text: $pasteBuffer)
-                    .font(.callout.monospaced())
-                    .frame(minHeight: 90)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .onChange(of: pasteBuffer) { old, new in
-                        applyPaste(new, wasPaste: new.count - old.count > 1)
-                    }
-            } else {
-                TextField("Access key ID", text: $config.accessKeyId)
-                    .font(.callout.monospaced())
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                HStack {
-                    Group {
-                        if showSecret {
-                            TextField("Secret access key", text: $secret)
-                        } else {
-                            SecureField("Secret access key", text: $secret)
-                        }
-                    }
-                    .font(.callout.monospaced())
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    Button {
-                        showSecret.toggle()
-                    } label: {
-                        Image(systemName: showSecret ? "eye.slash" : "eye").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(showSecret ? "Hide secret" : "Show secret")
-                }
-            }
+            TextField("Access key ID", text: $config.accessKeyId)
+                .font(.callout.monospaced())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            SecureField("Secret access key", text: $secret)
+                .font(.callout.monospaced())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
             LabeledContent("Function") {
                 Text("\(config.functionName) · \(CloudVendor.regionName(config.functionRegion))")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
             Button {
-                pasteBuffer = ""
-                pasteMode.toggle()
+                pasteNote = applyPaste(UIPasteboard.general.string ?? "")
             } label: {
-                Label(pasteMode ? "Back to fields" : "Paste credentials",
-                      systemImage: pasteMode ? "character.cursor.ibeam" : "doc.on.clipboard")
+                Label("Paste credentials", systemImage: "doc.on.clipboard")
             }
             Button {
                 Task { await runTest() }
@@ -84,6 +54,8 @@ struct AWSCredentialsSection: View {
         } footer: {
             if let test {
                 Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
+            } else if let pasteNote {
+                Text(pasteNote)
             } else {
                 Text("Only needs permission to call the function. Kept in Keychain.")
             }
@@ -106,7 +78,8 @@ struct AWSCredentialsSection: View {
 
     /// Accepts the terraform key file (`access_key_id: …`, `secret_access_key: …`, `region: …`, `function: …`)
     /// or AWS env/credentials spellings.
-    private func applyPaste(_ text: String, wasPaste: Bool) {
+    /// Fills the fields from clipboard text; returns what it found, for the footer.
+    private func applyPaste(_ text: String) -> String {
         var found = false
         for line in text.split(whereSeparator: \.isNewline) {
             let raw = line.replacingOccurrences(of: "export ", with: "")
@@ -123,10 +96,8 @@ struct AWSCredentialsSection: View {
             default: break
             }
         }
-        if wasPaste && found {
-            pasteBuffer = ""
-            pasteMode = false
-        }
+        return found ? "Filled the AWS key from the clipboard."
+            : "No AWS key found in the clipboard. Copy the key file's text (access_key_id: … / secret_access_key: …) and try again."
     }
 
     private func runTest() async {

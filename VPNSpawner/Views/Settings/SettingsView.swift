@@ -4,9 +4,7 @@ struct SettingsView: View {
     @ObservedObject var manager: SessionManager
     @State private var config = CloudCredentialConfig()
     @State private var secretKey = ""
-    @State private var showSecretKey = false
-    @State private var pasteMode = false
-    @State private var pasteBuffer = ""
+    @State private var pasteNote: String?
     @State private var test: (ok: Bool, text: String)?
     @State private var isTesting = false
     @State private var loaded = false
@@ -62,61 +60,22 @@ struct SettingsView: View {
     private var credentialsSection: some View {
         Section {
             VendorPicker(selection: $accountVendor)
-            if pasteMode {
-                TextEditor(text: $pasteBuffer)
-                    .font(.callout.monospaced())
-                    .frame(minHeight: 90)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .overlay(alignment: .topLeading) {
-                        if pasteBuffer.isEmpty {
-                            Text("secret_id: AKID…\nsecret_key: …")
-                                .font(.callout.monospaced())
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .onChange(of: pasteBuffer) { old, new in
-                        applyPaste(new, wasPaste: new.count - old.count > 1)
-                    }
-            } else {
-                TextField("SecretId", text: $config.secretId)
-                    .font(.callout.monospaced())
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                HStack {
-                    Group {
-                        if showSecretKey {
-                            TextField("SecretKey", text: $secretKey)
-                        } else {
-                            SecureField("SecretKey", text: $secretKey)
-                        }
-                    }
-                    .font(.callout.monospaced())
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    Button {
-                        showSecretKey.toggle()
-                    } label: {
-                        Image(systemName: showSecretKey ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(showSecretKey ? "Hide SecretKey" : "Show SecretKey")
-                }
-            }
+            TextField("SecretId", text: $config.secretId)
+                .font(.callout.monospaced())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            SecureField("SecretKey", text: $secretKey)
+                .font(.callout.monospaced())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
             // Mirrors the AWS block: the function this key invokes sits with the key.
             if config.executionMode == .controller {
                 functionRow
             }
             Button {
-                pasteBuffer = ""
-                pasteMode.toggle()
+                pasteNote = applyPaste(UIPasteboard.general.string ?? "")
             } label: {
-                Label(pasteMode ? "Back to fields" : "Paste credentials",
-                      systemImage: pasteMode ? "character.cursor.ibeam" : "doc.on.clipboard")
+                Label("Paste credentials", systemImage: "doc.on.clipboard")
             }
             testRow
             NavigationLink {
@@ -126,6 +85,9 @@ struct SettingsView: View {
             }
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
+                if let pasteNote {
+                    Text(pasteNote)
+                }
                 if let test {
                     Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
                 }
@@ -139,7 +101,8 @@ struct SettingsView: View {
     }
 
     /// Accepts `key: value` / `key=value` lines in any common spelling; fills only what it found.
-    private func applyPaste(_ text: String, wasPaste: Bool) {
+    /// Fills the fields from clipboard text; returns what it found, for the footer.
+    private func applyPaste(_ text: String) -> String {
         var foundId: String?
         var foundKey: String?
         for line in text.split(whereSeparator: \.isNewline) {
@@ -155,9 +118,11 @@ struct SettingsView: View {
         }
         if let foundId { config.secretId = foundId }
         if let foundKey { secretKey = foundKey }
-        if wasPaste && (foundId != nil || foundKey != nil) {
-            pasteBuffer = ""
-            pasteMode = false
+        switch (foundId, foundKey) {
+        case (.some, .some): return "Filled SecretId and SecretKey from the clipboard."
+        case (.some, nil): return "Filled SecretId; no SecretKey in the clipboard."
+        case (nil, .some): return "Filled SecretKey; no SecretId in the clipboard."
+        default: return "No credentials found in the clipboard. Copy the key file's text (secret_id: … / secret_key: …) and try again."
         }
     }
 

@@ -47,7 +47,7 @@ final class NativeVPNController: ObservableObject {
 
     private func refresh() {
         status = manager.connection.status
-        installedServer = (manager.protocolConfiguration as? NEVPNProtocolIKEv2)?.serverAddress
+        installedServer = manager.isEnabled ? (manager.protocolConfiguration as? NEVPNProtocolIKEv2)?.serverAddress : nil
     }
 
     /// Installs (or replaces) the config for this node, then starts the tunnel.
@@ -77,7 +77,8 @@ final class NativeVPNController: ObservableObject {
         manager.connection.stopVPNTunnel()
     }
 
-    /// Stops the tunnel and deletes the config so no dead entry stays in Settings → VPN.
+    /// Stops the tunnel and disables the config. Kept, not deleted: re-creating a config makes iOS
+    /// ask "Add VPN Configurations" again, while updating an existing one is silent.
     /// Returns once iOS reports the tunnel down, so later API calls don't go into a dying tunnel.
     func remove() async {
         try? await manager.loadFromPreferences()
@@ -89,7 +90,9 @@ final class NativeVPNController: ObservableObject {
                 try? await Task.sleep(nanoseconds: 300_000_000)
             }
         }
-        try? await manager.removeFromPreferences()
+        // Disabled, so its all-traffic routing can't block the network while no node exists.
+        manager.isEnabled = false
+        try? await manager.saveToPreferences()
         deleteSecret()
         refresh()
     }

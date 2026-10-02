@@ -23,3 +23,11 @@ __pycache__/
 *.tfstate.*
 .terraform/
 tools/
+docs/release/screenshots/
+*.tfvars
+*keys*.txt
+*.p8
+*.ipa
+*.xcarchive
+*.dSYM/
+screenshots/

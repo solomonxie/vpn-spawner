@@ -15,15 +15,10 @@ One CVM, set up by `bootstrap.sh` (also bundled into the iOS app, so both paths 
 
 IKEv2 manual setup: Server = Remote ID = node IP, Local ID `vpn-client`, PSK from `launch` (`ikev2Psk`).
 
-## Deploy to Tencent Cloud
+## Deploy
 
-```bash
-# Build and push to Tencent Container Registry (TCR) in ap-guangzhou
-docker build -t ccr.ccs.tencentyun.com/<your-ns>/vpn-controller:latest .
-docker push ccr.ccs.tencentyun.com/<your-ns>/vpn-controller:latest
-
-# Create SCF function with container image and attach CAM role with CVM permissions
-```
+`controller/package.sh` builds the zip (SCF and Lambda); steps per provider: [`docs/setup.md`](../docs/setup.md).
+A container image (`Dockerfile`) also works on SCF.
 
 Set the function timeout to >= 150s: `terminate` waits up to `firewallWaitSeconds` (default 120) for the instance to release its security group before deleting it.
 
@@ -43,9 +38,9 @@ Orphaned managed SGs (instance gone) are swept on each `launch`.
 
 ## AWS
 
-Same contract with `"vendor": "aws"` (Lambda `vpn-spawner-controller` in ca-central-1, deployed by
-`terraform/aws/vpn_spawner.tf`; build with `controller/package.sh`). Regions:
-us-west-2, us-east-1, ca-central-1, eu-central-1, ap-northeast-1, ap-southeast-1.
+Same contract with `"vendor": "aws"` (Lambda `vpn-spawner-controller`, default ca-central-1; build with
+`controller/package.sh`, deploy per [`docs/setup.md`](../docs/setup.md)). Regions:
+us-west-2, us-east-1, ca-central-1, eu-central-1, ap-northeast-1, ap-southeast-1, ap-east-1, ap-east-2.
 Node: t3a.micro (falls back to t3.micro), Ubuntu 22.04, default VPC.
 
 Self-destruct, three layers: per-node EventBridge Scheduler one-time schedule

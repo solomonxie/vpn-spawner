@@ -49,7 +49,7 @@ enum ControllerClient {
 }
 
 enum FunctionClient {
-    /// Where the controller function is deployed (terraform var.region); it manages any region.
+    /// Where the controller function is deployed (docs/setup.md); it manages any region.
     static let functionRegion = CloudCredentialConfig.defaultRegion
 
     private static let host = "scf.tencentcloudapi.com"

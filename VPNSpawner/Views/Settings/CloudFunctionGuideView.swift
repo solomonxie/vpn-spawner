@@ -20,7 +20,7 @@ struct CloudFunctionGuideView: View {
 
             Section("What gets created") {
                 step(1, "CAM role **SCF_VPNSpawner**", "Trusted by the SCF service (scf.qcloud.com), with the permissions below.")
-                step(2, "Function **\(functionName)**", "Python 3.10 event function in the region you launch in. 128 MB, 180 s timeout, execution role SCF_VPNSpawner. Code: this repo's controller/ folder.")
+                step(2, "Function **\(functionName)**", "Python 3.10 event function in Guangzhou (it manages every region). 256 MB, 180 s timeout, execution role SCF_VPNSpawner, timer trigger every 10 min. Code and steps: the setup guide below.")
                 step(3, "Invoke permission for this app's key", "Add scf:InvokeFunction on that one function to the vpn-spawner policy.")
                 step(4, "Switch this app to Cloud function", "Settings → Runs from.")
             }
@@ -46,7 +46,8 @@ struct CloudFunctionGuideView: View {
                 Text("Tencent SCF pay-as-you-go prices, mainland China. Idle costs nothing. Servers themselves are billed separately.")
             }
 
-            Section("Tencent docs") {
+            Section("Docs") {
+                Link("VPN Spawner setup guide", destination: ProjectLinks.tencentSetup)
                 Link("Cloud Function (SCF) documentation", destination: URL(string: "https://cloud.tencent.com/document/product/583")!)
                 Link("CAM roles", destination: URL(string: "https://cloud.tencent.com/document/product/598")!)
                 Link("SCF pricing", destination: URL(string: "https://cloud.tencent.com/document/product/583/12281")!)

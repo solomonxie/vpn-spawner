@@ -6,6 +6,7 @@ struct PermissionTemplate: Identifiable {
     let id: String
     let vendor: String
     let consoleURL: URL
+    let setupGuide: URL
     let steps: [String]
     let policyJSON: String
     /// Extra statement for "Runs from: Cloud function".
@@ -14,17 +15,18 @@ struct PermissionTemplate: Identifiable {
     static let all: [PermissionTemplate] = [.tencent, .aws]
 
     /// AWS always runs through its controller Lambda, so the app's key only needs to invoke it;
-    /// the Lambda's own role (terraform/aws/vpn_spawner.tf) holds the EC2 permissions.
+    /// the Lambda's own role (docs/setup.md) holds the EC2 permissions.
     static let aws = PermissionTemplate(
         id: "aws",
         vendor: "AWS",
         consoleURL: URL(string: "https://console.aws.amazon.com/iam/home#/users")!,
+        setupGuide: ProjectLinks.awsSetup,
         steps: [
-            "Deploy the vpn-spawner-controller Lambda (terraform/aws/vpn_spawner.tf does this and the steps below).",
+            "Deploy the vpn-spawner-controller Lambda in your account: see the setup guide below.",
             "IAM → Users → Create user vpn-spawner-app, no console access.",
             "Add permissions → Create inline policy → JSON → paste the template below (put in your account ID).",
             "Security credentials → Create access key → Application running outside AWS.",
-            "Back here: in AWS, tap Paste credentials and paste the key file's contents.",
+            "Back here: in AWS, tap Paste credentials (access_key_id, secret_access_key, region, function).",
         ],
         policyJSON: """
         {
@@ -43,6 +45,7 @@ struct PermissionTemplate: Identifiable {
         id: "tencent",
         vendor: "Tencent Cloud",
         consoleURL: URL(string: "https://console.cloud.tencent.com/cam")!,
+        setupGuide: ProjectLinks.tencentSetup,
         steps: [
             "Open Tencent Cloud console → Access Management (CAM).",
             "Users → Create user → Custom → programmatic access only, no console login. Name it vpn-spawner.",
@@ -213,6 +216,7 @@ struct KeyPermissionsGuideView: View {
                     }
                 }
                 Link("Open \(template.vendor) console", destination: template.consoleURL)
+                Link("Full setup guide", destination: template.setupGuide)
             } header: {
                 Text("Create it")
             }

@@ -1,5 +1,5 @@
 """REAL PRODUCTION TESTS on AWS: everything goes through the deployed Lambda with the iOS app's
-invoke-only key (~/.vpn-spawner/aws-vpn-spawner-keys.txt), exactly as the app will. Creates
+invoke-only key (VPN_SPAWNER_AWS_KEY_FILE, default ~/.vpn-spawner/aws-vpn-spawner-keys.txt), exactly as the app will. Creates
 billed EC2 instances, then destroys and verifies them. Direct boto3 checks use AWS_PROFILE."""
 import base64
 import json
@@ -19,7 +19,7 @@ from controller.ike_probe import probe as ike_probe
 from controller.spawn import current_public_ip
 from proxy_client import exit_ip_via
 
-KEY_FILE = os.path.expanduser("~/.vpn-spawner/aws-vpn-spawner-keys.txt")
+KEY_FILE = os.path.expanduser(os.environ.get("VPN_SPAWNER_AWS_KEY_FILE", "~/.vpn-spawner/aws-vpn-spawner-keys.txt"))
 REGION = os.environ.get("VPN_SPAWNER_AWS_REGION", "us-west-2")
 EXTRA_IP = "203.0.113.10"
 
@@ -52,11 +52,11 @@ def fetch(url):
 
 
 def admin_ec2():
-    return boto3.session.Session(profile_name=os.environ.get("AWS_PROFILE", "prod")).client("ec2", region_name=REGION)
+    return boto3.session.Session(profile_name=os.environ.get("AWS_PROFILE")).client("ec2", region_name=REGION)
 
 
 def admin_scheduler():
-    return boto3.session.Session(profile_name=os.environ.get("AWS_PROFILE", "prod")).client("scheduler", region_name=REGION)
+    return boto3.session.Session(profile_name=os.environ.get("AWS_PROFILE")).client("scheduler", region_name=REGION)
 
 
 def assert_gone(instance_id, sg_id):

@@ -76,7 +76,7 @@ struct AWSCredentialsSection: View {
         test = nil
     }
 
-    /// Accepts the terraform key file (`access_key_id: …`, `secret_access_key: …`, `region: …`, `function: …`)
+    /// Accepts the key text from docs/setup.md (`access_key_id: …`, `secret_access_key: …`, `region: …`, `function: …`)
     /// or AWS env/credentials spellings.
     /// Fills the fields from clipboard text; returns what it found, for the footer.
     private func applyPaste(_ text: String) -> String {

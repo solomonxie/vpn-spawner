@@ -59,7 +59,7 @@ enum CloudVendor: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// AWS invoke-only key for the controller Lambda (from terraform: ~/.vpn-spawner/aws-vpn-spawner-keys.txt).
+/// AWS invoke-only key for the controller Lambda (docs/setup.md).
 struct AWSCredentialConfig: Codable, Equatable {
     var accessKeyId = ""
     var functionName = "vpn-spawner-controller"

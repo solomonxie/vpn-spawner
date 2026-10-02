@@ -1,7 +1,7 @@
 # Tencent Cloud Permissions
 
 Least-privilege CAM policy for the spawn/terminate workflow: `cam-policy.json`.
-Source of truth: `terraform/tencentcloud/vpn_spawner.tf` (sub-user `vpn-spawner`, key in `~/.vpn-spawner/tencentcloud-vpn-spawner-keys.txt`).
+Attached to the CAM sub-user `vpn-spawner` (and the SCF role `SCF_VPNSpawner`); steps in [`../setup.md`](../setup.md).
 Verified by a passing `tests/test_real_lifecycle.py` run.
 
 ## Flow -> API

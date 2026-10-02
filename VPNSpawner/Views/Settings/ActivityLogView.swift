@@ -1,40 +1,6 @@
 import SwiftUI
 
-/// Session history + activity logs, rendered as the last sections of Settings.
-struct HistorySection: View {
-    @ObservedObject var manager: SessionManager
-
-    static let recentCount = 5
-
-    var body: some View {
-        Section {
-            if manager.history.isEmpty {
-                Text("No past sessions")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(manager.history.prefix(Self.recentCount)) { session in
-                    Self.sessionRow(session)
-                }
-            }
-            // Pushed, not a sheet: a sheet attached inside a Form section closed itself on first open.
-            NavigationLink {
-                ActivityLogView(manager: manager)
-            } label: {
-                HStack {
-                    Label("Activity log", systemImage: "list.bullet.rectangle")
-                    Spacer()
-                    let older = max(0, manager.history.count - Self.recentCount)
-                    if older > 0 {
-                        Text("\(older) older")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        } header: {
-            Text("History")
-        }
-    }
-
+enum SessionRow {
     static func sessionRow(_ session: SessionRecord) -> some View {
         HStack(spacing: 12) {
             Image(systemName: session.cleanupVerified == true ? "checkmark.seal.fill" : "clock.arrow.circlepath")
@@ -59,17 +25,17 @@ struct HistorySection: View {
     }
 }
 
-/// Older sessions (beyond the latest few) and the app's activity log.
+/// Every past session plus the app's activity log.
 struct ActivityLogView: View {
     @ObservedObject var manager: SessionManager
 
     var body: some View {
         List {
-            let older = manager.history.dropFirst(HistorySection.recentCount)
-            if !older.isEmpty {
-                Section("Earlier sessions") {
-                    ForEach(Array(older)) { HistorySection.sessionRow($0) }
+            Section("Sessions") {
+                if manager.history.isEmpty {
+                    Text("No past sessions").foregroundStyle(.secondary)
                 }
+                ForEach(manager.history) { SessionRow.sessionRow($0) }
             }
             Section("Log") {
                 if manager.logs.isEmpty {

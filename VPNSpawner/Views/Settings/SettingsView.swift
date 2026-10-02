@@ -18,7 +18,6 @@ struct SettingsView: View {
             modeSection
             credentialsSection
             testSection
-            HistorySection(manager: manager)
             demoSection
         }
         .scrollDismissesKeyboard(.immediately)
@@ -240,6 +239,12 @@ struct SettingsView: View {
                 }
             }
             .disabled(isTesting || (config.secretId.isEmpty && !config.isDemoMode))
+            // All history and logs live on this one page.
+            NavigationLink {
+                ActivityLogView(manager: manager)
+            } label: {
+                Text("Activity log")
+            }
         } footer: {
             if let test {
                 Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)

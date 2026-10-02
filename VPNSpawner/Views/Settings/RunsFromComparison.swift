@@ -3,6 +3,7 @@ import SwiftUI
 /// Side-by-side facts for the two execution modes; plain footer text, the selected column emphasized.
 struct RunsFromComparison: View {
     let selected: ExecutionMode
+    @State private var expanded = false
 
     private static let rows: [(label: String, phone: String, cloud: String)] = [
         ("Who does the work", "This iPhone", "A small function in your Tencent account"),
@@ -17,25 +18,32 @@ struct RunsFromComparison: View {
             Text(selected == .direct
                  ? "The app talks to Tencent Cloud directly with the key below."
                  : "The app only sends requests; the function launches, guards and deletes servers inside Tencent.")
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                GridRow {
-                    Text("")
-                    column("This iPhone", .direct, header: true)
-                    column("Cloud function", .controller, header: true)
-                }
-                Divider().gridCellUnsizedAxes(.horizontal)
-                ForEach(Self.rows, id: \.label) { row in
-                    GridRow(alignment: .firstTextBaseline) {
-                        Text(row.label).foregroundStyle(.secondary)
-                        column(row.phone, .direct)
-                        column(row.cloud, .controller)
+                .lineLimit(expanded ? nil : 2)
+            if expanded {
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                    GridRow {
+                        Text("")
+                        column("This iPhone", .direct, header: true)
+                        column("Cloud function", .controller, header: true)
+                    }
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    ForEach(Self.rows, id: \.label) { row in
+                        GridRow(alignment: .firstTextBaseline) {
+                            Text(row.label).foregroundStyle(.secondary)
+                            column(row.phone, .direct)
+                            column(row.cloud, .controller)
+                        }
                     }
                 }
+                .font(.caption)
+                Text("Either way, every server deletes itself when its time runs out, even if this app is deleted.")
             }
-            .font(.caption)
-            Text("Either way, every server deletes itself when its time runs out, even if this app is deleted.")
+            Button(expanded ? "Less" : "More") {
+                withAnimation(.snappy) { expanded.toggle() }
+            }
+            .font(.footnote.weight(.semibold))
+            .textCase(nil)
         }
-        .accessibilityElement(children: .combine)
     }
 
     private func column(_ text: String, _ mode: ExecutionMode, header: Bool = false) -> some View {

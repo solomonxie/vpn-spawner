@@ -55,7 +55,9 @@ final class NativeVPNController: ObservableObject {
         lastError = nil
         do {
             try await manager.loadFromPreferences()
-            if !isInstalled(for: server) || manager.isEnabled == false {
+            // Re-save configs installed before all-traffic routing so they pick it up.
+            let routesAll = manager.protocolConfiguration?.includeAllNetworks ?? false
+            if !isInstalled(for: server) || manager.isEnabled == false || !routesAll {
                 manager.protocolConfiguration = try makeProtocol(server: server, psk: psk)
                 manager.localizedDescription = name
                 manager.isEnabled = true
@@ -111,6 +113,11 @@ final class NativeVPNController: ObservableObject {
         proto.useExtendedAuthentication = false
         proto.disconnectOnSleep = false
         proto.deadPeerDetectionRate = .medium
+        // Everything, IPv6 included, goes through the tunnel; the node has no IPv6, so it's dropped
+        // there rather than leaking around the VPN. Caveat: while this config is on but not yet
+        // connected, iOS blocks traffic (kill-switch behaviour). LAN (AirDrop, printers) stays local.
+        proto.includeAllNetworks = true
+        proto.excludeLocalNetworks = true
         for sa in [proto.ikeSecurityAssociationParameters, proto.childSecurityAssociationParameters] {
             sa.encryptionAlgorithm = .algorithmAES256
             sa.integrityAlgorithm = .SHA256

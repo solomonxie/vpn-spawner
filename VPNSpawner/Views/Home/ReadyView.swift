@@ -29,6 +29,13 @@ struct ReadyView: View {
 
             Section {
                 testRow
+                NavigationLink {
+                    PrivacyCheckView(nodeIP: ip)
+                } label: {
+                    Label("Full privacy check", systemImage: "eye.trianglebadge.exclamationmark")
+                }
+            } footer: {
+                Text("Checks IPv6 and DNS leaks, Location Services and time zone, with browser tests.")
             }
 
             ConnectionsSection(session: session, toast: $toast, qr: $qr)

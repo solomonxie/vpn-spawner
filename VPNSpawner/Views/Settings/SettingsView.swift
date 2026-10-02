@@ -97,6 +97,11 @@ struct SettingsView: View {
                     .accessibilityLabel(showSecretKey ? "Hide SecretKey" : "Show SecretKey")
                 }
             }
+            NavigationLink {
+                KeyPermissionsGuideView(mode: config.executionMode)
+            } label: {
+                Label("Permissions this key needs", systemImage: "key.viewfinder")
+            }
         } header: {
             HStack(spacing: 6) {
                 Text("Tencent Cloud")
@@ -124,9 +129,12 @@ struct SettingsView: View {
                 .textCase(nil)
             }
         } footer: {
-            if !config.secretId.isEmpty && !config.secretId.hasPrefix("AKID") {
-                Text("Tencent SecretIds usually start with AKID.")
-                    .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 8) {
+                if !config.secretId.isEmpty && !config.secretId.hasPrefix("AKID") {
+                    Text("Tencent SecretIds usually start with AKID.")
+                        .foregroundStyle(.orange)
+                }
+                KeyCapabilitiesFooter(mode: config.executionMode)
             }
         }
     }
@@ -177,28 +185,8 @@ struct SettingsView: View {
         } header: {
             Text("Runs from")
         } footer: {
-            // Plain text, not rows, so the tradeoffs don't read as tappable options.
-            VStack(alignment: .leading, spacing: 4) {
-                if config.executionMode == .direct {
-                    tradeoff(.pro, "Nothing to set up. Free.")
-                    tradeoff(.con, "Steps run from this phone; if closed they resume on reopen. Tencent's timer still deletes the server on time.")
-                } else {
-                    tradeoff(.pro, "Launch, allowlist and cleanup run inside Tencent, unaffected by a flaky phone connection.")
-                    tradeoff(.pro, "A watchdog checks every 10 min that no server outlives its timer.")
-                    tradeoff(.con, "One-time setup (role + function). Under ¥0.01 per session.")
-                }
-            }
-        }
-    }
-
-    private enum Tradeoff { case pro, con }
-
-    private func tradeoff(_ kind: Tradeoff, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(kind == .pro ? "+" : "−")
-                .fontWeight(.semibold)
-                .foregroundStyle(kind == .pro ? .green : .orange)
-            Text(text)
+            // Footer text, not rows, so the comparison doesn't read as tappable options.
+            RunsFromComparison(selected: config.executionMode)
         }
     }
 
@@ -224,7 +212,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(config.controllerFunctionName)
                         .font(.callout.monospaced())
-                    Text("Function in your account, in the launch region")
+                    Text("Function in your Tencent account (\(IdleView.regionName(FunctionClient.functionRegion)))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

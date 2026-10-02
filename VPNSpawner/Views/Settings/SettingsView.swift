@@ -171,8 +171,7 @@ struct SettingsView: View {
                 Text("Cloud function").tag(ExecutionMode.controller)
             }
             .pickerStyle(.segmented)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+            .padding(.vertical, 4)
 
             if config.executionMode == .controller {
                 functionRow

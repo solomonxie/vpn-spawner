@@ -68,6 +68,8 @@ struct SessionRecord: Codable, Identifiable, Hashable {
     /// Filled from the node's /client.json once ready.
     var endpoints: [NodeEndpoint]?
     var instanceType: String?
+    /// nil for sessions from before AWS support (Tencent).
+    var vendor: CloudVendor?
     /// When the session closed; freezes elapsed time and cost in history.
     var endTime: Date?
 

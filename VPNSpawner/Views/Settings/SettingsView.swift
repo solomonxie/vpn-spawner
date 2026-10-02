@@ -18,6 +18,7 @@ struct SettingsView: View {
             modeSection
             credentialsSection
             testSection
+            AWSCredentialsSection()
             demoSection
         }
         .scrollDismissesKeyboard(.immediately)

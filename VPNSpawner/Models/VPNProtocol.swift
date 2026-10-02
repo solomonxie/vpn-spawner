@@ -77,6 +77,10 @@ struct LaunchPreferences: Codable, Equatable {
     var protocols: Set<VPNProtocol> = VPNProtocol.defaults
     var durationMinutes: Int = 10
     var region: String = CloudCredentialConfig.defaultRegion
+    /// Optional so preferences saved before AWS support still decode.
+    var vendor: CloudVendor?
+
+    var effectiveVendor: CloudVendor { vendor ?? .tencent }
 
     static let durations = [10, 30, 60, 120]
     private static let key = "vpn.launch.preferences"

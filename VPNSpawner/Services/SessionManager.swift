@@ -151,8 +151,23 @@ final class SessionManager: ObservableObject {
             durationMinutes: prefs.durationMinutes,
             cipher: "chacha20-ietf-poly1305",
             port: 8388,
-            protocols: prefs.protocols.isEmpty ? VPNProtocol.defaults : prefs.protocols
+            protocols: prefs.protocols.isEmpty ? VPNProtocol.defaults : prefs.protocols,
+            vendor: prefs.effectiveVendor
         )
+    }
+
+    /// AWS always, and Tencent in cloud-function mode: every cloud call goes through the controller
+    /// function, so the app's key only needs permission to invoke it.
+    private func isRemote(_ session: SessionRecord) -> Bool {
+        session.vendor == .aws || CloudCredentialConfig.load().config.executionMode == .controller
+    }
+
+    private static let goneStates: Set<String> = ["TERMINATING", "SHUTDOWN", "LAUNCH_FAILED", "TERMINATED", "STOPPED"]
+
+    /// Live instances the controller finds for this session (empty once deleted).
+    private func remoteLiveInstances(_ session: SessionRecord) async throws -> [ControllerInvocationResult.FoundInstance] {
+        let found = try await ControllerClient.invoke("find", session: session)
+        return (found.instances ?? []).filter { !Self.goneStates.contains(($0.status ?? "").uppercased()) }
     }
 
     func launchSession(
@@ -160,14 +175,24 @@ final class SessionManager: ObservableObject {
         durationMinutes: Int,
         cipher: String,
         port: Int,
-        protocols: Set<VPNProtocol> = VPNProtocol.defaults
+        protocols: Set<VPNProtocol> = VPNProtocol.defaults,
+        vendor: CloudVendor = .tencent
     ) async {
         let (config, secretKey) = CloudCredentialConfig.load()
         launchError = nil
-        if !config.isDemoMode && (config.secretId.isEmpty || secretKey.isEmpty) {
-            launchError = "Add your Tencent Cloud SecretId and SecretKey in Settings first."
-            appendLog("Launch blocked: no Tencent Cloud credentials configured")
-            return
+        if !config.isDemoMode {
+            switch vendor {
+            case .tencent where config.secretId.isEmpty || secretKey.isEmpty:
+                launchError = "Add your Tencent Cloud SecretId and SecretKey in Settings first."
+            case .aws where !AWSCredentialConfig.load().config.isComplete || AWSCredentialConfig.load().secret.isEmpty:
+                launchError = "Add your AWS access key in Settings first."
+            default:
+                break
+            }
+            if let launchError {
+                appendLog("Launch blocked: \(launchError)")
+                return
+            }
         }
 
         let tag = "sess-\(Int(Date().timeIntervalSince1970) % 100000)"
@@ -182,17 +207,22 @@ final class SessionManager: ObservableObject {
                 port: port,
                 password: ShadowsocksConfig.generatePassword(),
                 method: cipher,
-                tag: "Tencent-\(region)"
+                tag: "VPN-\(region)"
             ),
             isDemo: config.isDemoMode
         )
+        session.vendor = vendor
+        if vendor == .aws {
+            session.estimatedCostPerHour = 0.11  // ≈ $0.015/hr shown in ¥ like Tencent sessions
+        }
         session.ikev2PSK = ShadowsocksConfig.generatePassword(length: 24)
         session.protocols = VPNProtocol.allCases.filter(protocols.contains)
         activityLog = []
         session.stage = .preparing
         session.stageStartedAt = Date()
         save(session)
-        appendLog("Launching \(tag) in \(region) (\(session.isDemo ? "Demo" : config.executionMode.rawValue))")
+        let mode = session.isDemo ? "Demo" : vendor == .aws ? "AWS Lambda" : config.executionMode.rawValue
+        appendLog("Launching \(tag) on \(vendor.displayName) \(CloudVendor.regionName(region)) (\(mode))")
 
         if session.isDemo {
             await simulateProvisioning()
@@ -238,7 +268,15 @@ final class SessionManager: ObservableObject {
         guard var session = currentSession, session.instanceId == nil else { return }
 
         // The app may have died after RunInstances but before saving the ID.
-        if session.securityGroupId != nil || config.executionMode == .controller {
+        if isRemote(session) {
+            if let found = try await remoteLiveInstances(session).first {
+                try Task.checkCancellation()
+                session.instanceId = found.instanceId
+                save(session)
+                appendLog("Recovered instance \(found.instanceId) by session tag")
+                return
+            }
+        } else if session.securityGroupId != nil {
             if let found = try await ComputeClient.findInstances(
                 sessionTag: session.id, region: session.region, credential: credential
             ).first {
@@ -255,8 +293,7 @@ final class SessionManager: ObservableObject {
         appendLog("Node will only accept traffic from \(myIP)")
         let terminateAt = Date().addingTimeInterval(TimeInterval((session.plannedMinutes ?? 10) * 60) + Self.provisioningBuffer)
 
-        switch config.executionMode {
-        case .direct:
+        if !isRemote(session) {
             if session.securityGroupId == nil {
                 let replaced = try await ComputeClient.replaceRunningNodes(region: session.region, credential: credential)
                 if !replaced.isEmpty {
@@ -303,21 +340,14 @@ final class SessionManager: ObservableObject {
                 throw error
             }
 
-        case .controller:
+        } else {
             setStage(.launching)
-            let result = try await FunctionClient.invoke(
-                functionName: config.controllerFunctionName,
-                region: session.region,
-                action: "launch",
-                session: session,
-                extra: [
-                    "allowIps": [myIP],
-                    "ikev2Psk": session.ikev2PSK ?? "",
-                    "protocols": (session.protocols ?? Array(VPNProtocol.defaults)).map(\.rawValue),
-                    "expiryTimestamp": Int(terminateAt.timeIntervalSince1970),
-                ],
-                credential: credential
-            )
+            let result = try await ControllerClient.invoke("launch", session: session, extra: [
+                "allowIps": [myIP],
+                "ikev2Psk": session.ikev2PSK ?? "",
+                "protocols": (session.protocols ?? Array(VPNProtocol.defaults)).map(\.rawValue),
+                "expiryTimestamp": Int(terminateAt.timeIntervalSince1970),
+            ])
             guard result.success, let instanceId = result.instanceId else {
                 throw CloudAPIError.badResponse(result.message ?? "Controller launch failed")
             }
@@ -338,6 +368,20 @@ final class SessionManager: ObservableObject {
         guard let session = currentSession, session.publicIP == nil, let instanceId = session.instanceId else { return }
         setStage(.booting)
         let deadline = Date().addingTimeInterval(Self.bootTimeout)
+        while Date() < deadline, isRemote(session) {
+            if let status = try? await ControllerClient.invoke("status", session: session),
+               status.status == "RUNNING", let ip = status.publicIP, !ip.isEmpty {
+                try Task.checkCancellation()
+                var updated = currentSession ?? session
+                updated.publicIP = ip
+                updated.shadowsocks.host = ip
+                updated.allowedIPs = status.allowedIps ?? updated.allowedIPs
+                save(updated)
+                appendLog("Server RUNNING at \(ip)")
+                return
+            }
+            try await Task.sleep(nanoseconds: 4_000_000_000)
+        }
         while Date() < deadline {
             if let info = try? await ComputeClient.instanceIfExists(
                 instanceId: instanceId, region: session.region, credential: credential
@@ -409,20 +453,14 @@ final class SessionManager: ObservableObject {
     private func scheduleCloudTerminate(session: SessionRecord, config: CloudCredentialConfig, credential: CloudSigner.Credential) async {
         guard let instanceId = session.instanceId else { return }
         do {
-            if config.executionMode == .controller {
-                _ = try await FunctionClient.invoke(
-                    functionName: config.controllerFunctionName,
-                    region: session.region,
-                    action: "extend",
-                    session: session,
-                    credential: credential
-                )
+            if isRemote(session) {
+                _ = try await ControllerClient.invoke("extend", session: session)
             } else {
                 try await ComputeClient.rescheduleTerminate(
                     instanceId: instanceId, at: session.expiryTime, region: session.region, credential: credential
                 )
             }
-            appendLog("Cloud self-destruct set to \(ComputeClient.timerTime(session.expiryTime))")
+            appendLog("Cloud self-destruct set to \(ComputeClient.timerTime(session.expiryTime)) UTC")
         } catch {
             appendLog("Couldn't move cloud timer (launch timer still applies): \(error.localizedDescription)")
         }
@@ -478,15 +516,8 @@ final class SessionManager: ObservableObject {
         do {
             let ip = try await PublicIPService.current()
             let allowed: [String]
-            if config.executionMode == .controller {
-                let result = try await FunctionClient.invoke(
-                    functionName: config.controllerFunctionName,
-                    region: session.region,
-                    action: "allow_ip",
-                    session: session,
-                    extra: ["ip": ip],
-                    credential: credential
-                )
+            if isRemote(session) {
+                let result = try await ControllerClient.invoke("allow_ip", session: session, extra: ["ip": ip])
                 guard result.success, let ips = result.allowedIps else {
                     throw CloudAPIError.badResponse(result.message ?? "Controller allow_ip failed")
                 }
@@ -552,7 +583,7 @@ final class SessionManager: ObservableObject {
             session.cleanupVerified = !session.isDemo
             closeSession(session, status: .terminated, note: "verified deleted: no server or firewall left")
         } else {
-            session.errorMessage = "Couldn't confirm deletion yet. Retries when you reopen the app; Tencent's delete timer is still set."
+            session.errorMessage = "Couldn't confirm deletion yet. Retries when you reopen the app; the cloud delete timer and watchdog still apply."
             save(session)
             appendLog("Teardown not verified; session kept in Stopping for retry")
         }
@@ -572,6 +603,9 @@ final class SessionManager: ObservableObject {
     ) async -> Bool {
         let region = session.region
         operationStatusMessage = "Deleting server..."
+        if isRemote(session) {
+            return await destroyAndVerifyRemote(&session)
+        }
         if session.instanceId == nil,
            let found = try? await ComputeClient.findInstances(sessionTag: session.id, region: region, credential: credential).first {
             session.instanceId = found.instanceId
@@ -624,6 +658,42 @@ final class SessionManager: ObservableObject {
         return serverGone && firewallGone
     }
 
+    /// Through the controller: terminate (it deletes the server, its timer and firewall), then
+    /// prove absence via find. Never touches the cloud directly, so an invoke-only key suffices.
+    private func destroyAndVerifyRemote(_ session: inout SessionRecord) async -> Bool {
+        if session.instanceId == nil, let found = try? await remoteLiveInstances(session).first {
+            session.instanceId = found.instanceId
+            save(session)
+        }
+        var firewallGone = session.securityGroupId == nil
+        if session.instanceId != nil {
+            do {
+                let result = try await ControllerClient.invoke("terminate", session: session, extra: ["firewallWaitSeconds": 120])
+                firewallGone = result.securityGroupDeleted ?? firewallGone
+                appendLog(result.success ? "Server terminating" : "Terminate pending: \(result.message ?? result.status ?? "")")
+            } catch {
+                appendLog("Terminate call failed (will verify anyway): \(error.localizedDescription)")
+            }
+        }
+
+        operationStatusMessage = "Verifying server is gone..."
+        var serverGone = false
+        let deadline = Date().addingTimeInterval(Self.verifyTimeout)
+        while Date() < deadline {
+            if let live = try? await remoteLiveInstances(session), live.isEmpty {
+                serverGone = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+        appendLog(serverGone ? "Verified: server no longer exists" : "Server still listed after \(Int(Self.verifyTimeout))s")
+        appendLog(firewallGone ? "Verified: firewall deleted" : "Firewall not confirmed deleted; the watchdog sweeps it")
+        if serverGone && firewallGone {
+            operationStatusMessage = "Verified: nothing left billing"
+        }
+        return serverGone && firewallGone
+    }
+
     private func closeSession(_ session: SessionRecord, status: SessionStatus, note: String) {
         var closed = session
         closed.status = status
@@ -641,6 +711,10 @@ final class SessionManager: ObservableObject {
     func reconcileSession() async {
         guard let session = currentSession, let instanceId = session.instanceId, !session.isDemo else { return }
         let (config, credential) = credentials()
+        if isRemote(session) {
+            await reconcileRemote(session)
+            return
+        }
         guard !config.secretId.isEmpty else { return }
 
         do {
@@ -657,6 +731,29 @@ final class SessionManager: ObservableObject {
             }
             var updated = session
             if let ip = info.publicIP {
+                updated.publicIP = ip
+                updated.shadowsocks.host = ip
+                if updated.status == .ready, updated.endpoints?.isEmpty ?? true {
+                    updated.endpoints = await NodeHealth.endpoints(ip: ip)
+                }
+            }
+            save(updated)
+        } catch {
+            appendLog("Reconcile error: \(error.localizedDescription)")
+        }
+    }
+
+    private func reconcileRemote(_ session: SessionRecord) async {
+        do {
+            let live = try await remoteLiveInstances(session)
+            guard let mine = live.first(where: { $0.instanceId == session.instanceId }) else {
+                appendLog("Instance \(session.instanceId ?? "") is gone (cloud timer or watchdog). Closing session.")
+                await NativeVPNController.shared.remove()
+                closeSession(session, status: .terminated, note: "closed; instance already gone")
+                return
+            }
+            var updated = session
+            if let ip = mine.publicIP {
                 updated.publicIP = ip
                 updated.shadowsocks.host = ip
                 if updated.status == .ready, updated.endpoints?.isEmpty ?? true {

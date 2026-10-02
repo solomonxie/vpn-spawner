@@ -6,17 +6,21 @@ struct IdleView: View {
     @State private var prefs = LaunchPreferences.load()
     @State private var showMoreProtocols = false
 
-    static let regions: [(id: String, name: String)] = [
-        ("ap-guangzhou", "Guangzhou"),
-        ("ap-shanghai", "Shanghai"),
-        ("ap-beijing", "Beijing"),
-        ("ap-hongkong", "Hong Kong"),
-        ("ap-tokyo", "Tokyo"),
-        ("ap-singapore", "Singapore"),
-    ]
-
     static func regionName(_ id: String) -> String {
-        regions.first { $0.id == id }?.name ?? id
+        CloudVendor.regionName(id)
+    }
+
+    /// Switching cloud picks that cloud's first region; regions differ per vendor.
+    private var vendorBinding: Binding<CloudVendor> {
+        Binding(
+            get: { prefs.effectiveVendor },
+            set: { vendor in
+                prefs.vendor = vendor
+                if !vendor.regions.contains(where: { $0.id == prefs.region }) {
+                    prefs.region = vendor.defaultRegion
+                }
+            }
+        )
     }
 
     private var primaryProtocols: [VPNProtocol] { [.ikev2, .shadowsocks] }
@@ -66,8 +70,14 @@ struct IdleView: View {
             }
 
             Section("Server") {
+                Picker("Cloud", selection: vendorBinding) {
+                    ForEach(CloudVendor.allCases) { vendor in
+                        Text(vendor.displayName).tag(vendor)
+                    }
+                }
+                .pickerStyle(.segmented)
                 Picker("Region", selection: $prefs.region) {
-                    ForEach(Self.regions, id: \.id) { region in
+                    ForEach(prefs.effectiveVendor.regions, id: \.id) { region in
                         Text(region.name).tag(region.id)
                     }
                 }
@@ -168,7 +178,7 @@ struct IdleView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.large)
             .disabled(manager.isOperating || prefs.protocols.isEmpty)
-            Text("About ¥0.05/hr · \(Self.regionName(prefs.region)) · auto-destroys after \(prefs.durationMinutes) min")
+            Text("\(prefs.effectiveVendor.priceHint) · \(Self.regionName(prefs.region)) · auto-destroys after \(prefs.durationMinutes) min")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

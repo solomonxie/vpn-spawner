@@ -10,6 +10,42 @@ struct ControllerInvocationResult: Decodable {
     let allowedIps: [String]?
     let ikev2Psk: String?
     var replaced: [String]? = nil
+    var terminateAt: String? = nil
+    var securityGroupDeleted: Bool? = nil
+    var instances: [FoundInstance]? = nil
+
+    struct FoundInstance: Decodable {
+        let instanceId: String
+        let status: String?
+        let publicIP: String?
+    }
+}
+
+/// One entry point to the controller function for both vendors (Tencent SCF, AWS Lambda).
+/// Requests carry "vendor"; the function then manages the session's region on that cloud.
+enum ControllerClient {
+    static func invoke(
+        _ action: String,
+        session: SessionRecord,
+        extra: [String: Any] = [:]
+    ) async throws -> ControllerInvocationResult {
+        var payload = FunctionClient.requestBody(action: action, session: session, region: session.region)
+        payload.merge(extra) { _, new in new }
+        switch session.vendor ?? .tencent {
+        case .tencent:
+            let (config, secretKey) = CloudCredentialConfig.load()
+            return try await FunctionClient.invoke(
+                functionName: config.controllerFunctionName,
+                payload: payload,
+                credential: CloudSigner.Credential(secretId: config.secretId, secretKey: secretKey)
+            )
+        case .aws:
+            let (config, secret) = AWSCredentialConfig.load()
+            payload["vendor"] = "aws"
+            let data = try await LambdaClient.invoke(payload: payload, config: config, secret: secret)
+            return try JSONDecoder().decode(ControllerInvocationResult.self, from: data)
+        }
+    }
 }
 
 enum FunctionClient {
@@ -28,6 +64,12 @@ enum FunctionClient {
         extra: [String: Any] = [:],
         credential: CloudSigner.Credential
     ) async throws -> ControllerInvocationResult {
+        var payload = requestBody(action: action, session: session, region: region)
+        payload.merge(extra) { _, new in new }
+        return try await invoke(functionName: functionName, payload: payload, credential: credential)
+    }
+
+    static func requestBody(action: String, session: SessionRecord, region: String) -> [String: Any] {
         var requestDict: [String: Any] = [
             "action": action,
             "sessionId": session.id,
@@ -43,8 +85,14 @@ enum FunctionClient {
         if let sgId = session.securityGroupId {
             requestDict["securityGroupId"] = sgId
         }
-        requestDict.merge(extra) { _, new in new }
+        return requestDict
+    }
 
+    static func invoke(
+        functionName: String,
+        payload requestDict: [String: Any],
+        credential: CloudSigner.Credential
+    ) async throws -> ControllerInvocationResult {
         let clientContextData = try JSONSerialization.data(withJSONObject: requestDict)
         let clientContextString = String(data: clientContextData, encoding: .utf8) ?? "{}"
 

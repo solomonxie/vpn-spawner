@@ -11,7 +11,33 @@ struct PermissionTemplate: Identifiable {
     /// Extra statement for "Runs from: Cloud function".
     let cloudFunctionJSON: String
 
-    static let all: [PermissionTemplate] = [.tencent]
+    static let all: [PermissionTemplate] = [.tencent, .aws]
+
+    /// AWS always runs through its controller Lambda, so the app's key only needs to invoke it;
+    /// the Lambda's own role (terraform/aws/vpn_spawner.tf) holds the EC2 permissions.
+    static let aws = PermissionTemplate(
+        id: "aws",
+        vendor: "AWS",
+        consoleURL: URL(string: "https://console.aws.amazon.com/iam/home#/users")!,
+        steps: [
+            "Deploy the vpn-spawner-controller Lambda (terraform/aws/vpn_spawner.tf does this and the steps below).",
+            "IAM → Users → Create user vpn-spawner-app, no console access.",
+            "Add permissions → Create inline policy → JSON → paste the template below (put in your account ID).",
+            "Security credentials → Create access key → Application running outside AWS.",
+            "Back here: in AWS, tap Paste both and paste the key file's contents.",
+        ],
+        policyJSON: """
+        {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": "lambda:InvokeFunction",
+            "Resource": "arn:aws:lambda:ca-central-1:<YOUR_ACCOUNT_ID>:function:vpn-spawner-controller"
+          }]
+        }
+        """,
+        cloudFunctionJSON: ""
+    )
 
     static let tencent = PermissionTemplate(
         id: "tencent",
@@ -135,7 +161,12 @@ struct KeyCapabilitiesFooter: View {
 /// Pushed guide: why a limited key, how to create it, and the exact policy to paste.
 struct KeyPermissionsGuideView: View {
     let mode: ExecutionMode
-    @State private var vendorID = PermissionTemplate.all[0].id
+    @State private var vendorID: String
+
+    init(mode: ExecutionMode, initialVendor: String = PermissionTemplate.all[0].id) {
+        self.mode = mode
+        _vendorID = State(initialValue: initialVendor)
+    }
     @State private var toast: String?
 
     private var template: PermissionTemplate {
@@ -188,7 +219,7 @@ struct KeyPermissionsGuideView: View {
 
             policySection("Policy template", template.policyJSON,
                           footer: "Deleting is limited to resources tagged ManagedBy=VPNSpawner, which this app adds to everything it creates.")
-            if mode == .controller {
+            if mode == .controller && !template.cloudFunctionJSON.isEmpty {
                 policySection("Add for cloud function mode", template.cloudFunctionJSON,
                               footer: "Add this statement to the policy's list. Replace <YOUR_ACCOUNT_ID> with your account ID (top-right of the console).")
             }

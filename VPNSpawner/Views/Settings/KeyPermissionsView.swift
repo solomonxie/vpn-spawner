@@ -105,20 +105,29 @@ enum KeyCapability: CaseIterable {
 /// Compact footer list under the key fields.
 struct KeyCapabilitiesFooter: View {
     let mode: ExecutionMode
+    @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Use a separate, limited key, never your main account key. To launch a server it must be allowed to:")
-            ForEach(KeyCapability.needed(for: mode), id: \.self) { capability in
-                Label {
-                    Text(capability.text)
-                } icon: {
-                    Image(systemName: capability.symbol)
-                        .foregroundStyle(.tint)
-                        .imageScale(.small)
+                .lineLimit(expanded ? nil : 2)
+            if expanded {
+                ForEach(KeyCapability.needed(for: mode), id: \.self) { capability in
+                    Label {
+                        Text(capability.text)
+                    } icon: {
+                        Image(systemName: capability.symbol)
+                            .foregroundStyle(.tint)
+                            .imageScale(.small)
+                    }
                 }
+                Text("Nothing else: it can't touch other servers, storage or billing settings. Stored only in this iPhone's Keychain.")
             }
-            Text("Nothing else: it can't touch other servers, storage or billing settings. Stored only in this iPhone's Keychain.")
+            Button(expanded ? "Less" : "More") {
+                withAnimation(.snappy) { expanded.toggle() }
+            }
+            .font(.footnote.weight(.semibold))
+            .textCase(nil)
         }
     }
 }

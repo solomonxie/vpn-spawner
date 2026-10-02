@@ -32,12 +32,17 @@ struct CloudCredentialConfig: Codable, Equatable {
     }
 
     static let configKey = "vpn.credential.config"
+    static let modeChosenKey = "vpn.credential.modeChosenByUser"
     static let secretKeyAccount = "vpn.credential.secretKey"
 
     static func load() -> (config: CloudCredentialConfig, secretKey: String) {
         let secretKey = KeychainStore.load(forKey: secretKeyAccount) ?? ""
         if let data = UserDefaults.standard.data(forKey: configKey),
-           let config = try? JSONDecoder().decode(CloudCredentialConfig.self, from: data) {
+           var config = try? JSONDecoder().decode(CloudCredentialConfig.self, from: data) {
+            // Cloud function is the default until the user deliberately picks This iPhone.
+            if !UserDefaults.standard.bool(forKey: modeChosenKey) {
+                config.executionMode = .controller
+            }
             return (config, secretKey)
         }
         return (CloudCredentialConfig(), secretKey)

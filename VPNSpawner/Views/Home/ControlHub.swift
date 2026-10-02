@@ -54,9 +54,10 @@ struct ControlHub: View {
         .accessibilityHint("Copies the server IP")
     }
 
+    /// Grey until connected, so the ring only lights up when the VPN is actually on.
     private var ringColor: Color {
         if session.remainingTime < 120 { return .orange }
-        return connected ? .green : .accentColor
+        return connected ? .green : Color(.systemGray3)
     }
 
     private var ring: some View {
@@ -80,7 +81,8 @@ struct ControlHub: View {
                 } else if canConnect {
                     Image(systemName: "power")
                         .font(.system(size: 52, weight: .semibold))
-                        .foregroundStyle(connected ? ringColor : .primary)
+                        .foregroundStyle(connected ? ringColor : .accentColor)
+                        .symbolEffect(.pulse, options: .repeating, isActive: !connected)
                 } else {
                     Image(systemName: "lock.shield")
                         .font(.system(size: 46, weight: .regular))
@@ -112,7 +114,7 @@ struct ControlHub: View {
         VStack(spacing: 4) {
             Text(statusTitle)
                 .font(.headline)
-                .foregroundStyle(connected ? Color.green : Color.secondary)
+                .foregroundStyle(connected ? Color.green : canConnect ? Color.accentColor : Color.secondary)
             Text(session.formattedRemainingTime)
                 .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
                 .contentTransition(.numericText())

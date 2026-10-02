@@ -21,7 +21,8 @@ try:
 except ImportError:
     from controller import app as core
 
-REGIONS = ["us-west-2", "us-east-1", "ca-central-1", "eu-central-1", "ap-northeast-1", "ap-southeast-1"]
+REGIONS = ["us-west-2", "us-east-1", "ca-central-1", "eu-central-1", "ap-northeast-1", "ap-southeast-1",
+           "ap-east-1", "ap-east-2"]  # Hong Kong, Taipei: opt-in regions, enabled on the account
 INSTANCE_TYPES = ["t3a.micro", "t3.micro"]  # 2 vCPU burst / 1 GiB: enough for sing-box + strongSwan
 AMI_PARAM = "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
 NODE_NAME = "vpn-spawner-node"

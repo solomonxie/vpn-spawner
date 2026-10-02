@@ -97,6 +97,8 @@ struct IdleView: View {
         .listStyle(.insetGrouped)
         .safeAreaInset(edge: .bottom) { launchBar }
         .onChange(of: prefs) { _, new in new.save() }
+        // Pick up the last vendor/region/protocols even if this view outlived a change.
+        .onAppear { prefs = LaunchPreferences.load() }
     }
 
     private var hero: some View {

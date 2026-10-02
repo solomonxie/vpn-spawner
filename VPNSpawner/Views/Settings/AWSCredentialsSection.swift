@@ -2,6 +2,7 @@ import SwiftUI
 
 /// AWS invoke-only key: the app only calls the controller Lambda, which does all EC2 work.
 struct AWSCredentialsSection: View {
+    @Binding var vendor: CloudVendor
     @State private var config = AWSCredentialConfig()
     @State private var secret = ""
     @State private var showSecret = false
@@ -13,6 +14,7 @@ struct AWSCredentialsSection: View {
 
     var body: some View {
         Section {
+            VendorPicker(selection: $vendor)
             if pasteMode {
                 TextEditor(text: $pasteBuffer)
                     .font(.callout.monospaced())
@@ -53,10 +55,17 @@ struct AWSCredentialsSection: View {
                     .foregroundStyle(.secondary)
             }
             Button {
+                pasteBuffer = ""
+                pasteMode.toggle()
+            } label: {
+                Label(pasteMode ? "Back to fields" : "Paste credentials",
+                      systemImage: pasteMode ? "character.cursor.ibeam" : "doc.on.clipboard")
+            }
+            Button {
                 Task { await runTest() }
             } label: {
                 HStack {
-                    Text("Test AWS connection")
+                    Label("Test connection", systemImage: "bolt.horizontal.circle")
                     Spacer()
                     if isTesting {
                         ProgressView()
@@ -70,18 +79,7 @@ struct AWSCredentialsSection: View {
             NavigationLink {
                 KeyPermissionsGuideView(mode: .controller, initialVendor: "aws")
             } label: {
-                Text("Permissions this key needs")
-            }
-        } header: {
-            HStack {
-                Text("Access key")
-                Spacer()
-                Button(pasteMode ? "Back to fields" : "Paste credentials") {
-                    pasteBuffer = ""
-                    pasteMode.toggle()
-                }
-                .font(.caption.weight(.medium))
-                .textCase(nil)
+                Label("Permissions this key needs", systemImage: "key.viewfinder")
             }
         } footer: {
             if let test {

@@ -16,13 +16,11 @@ struct SettingsView: View {
     var body: some View {
         Form {
             modeSection
-            accountPickerSection
             switch accountVendor {
             case .tencent:
                 credentialsSection
-                testSection
             case .aws:
-                AWSCredentialsSection()
+                AWSCredentialsSection(vendor: $accountVendor)
             }
             activitySection
             demoSection
@@ -44,7 +42,12 @@ struct SettingsView: View {
             secretKey = stored.secretKey
             loaded = true
         }
-        .onChange(of: config) { _, _ in persist() }
+        .onChange(of: config) { old, new in
+            if loaded && old.executionMode != new.executionMode {
+                UserDefaults.standard.set(true, forKey: CloudCredentialConfig.modeChosenKey)
+            }
+            persist()
+        }
         .onChange(of: secretKey) { _, _ in persist() }
     }
 
@@ -58,6 +61,7 @@ struct SettingsView: View {
 
     private var credentialsSection: some View {
         Section {
+            VendorPicker(selection: $accountVendor)
             if pasteMode {
                 TextEditor(text: $pasteBuffer)
                     .font(.callout.monospaced())
@@ -107,24 +111,24 @@ struct SettingsView: View {
             if config.executionMode == .controller {
                 functionRow
             }
+            Button {
+                pasteBuffer = ""
+                pasteMode.toggle()
+            } label: {
+                Label(pasteMode ? "Back to fields" : "Paste credentials",
+                      systemImage: pasteMode ? "character.cursor.ibeam" : "doc.on.clipboard")
+            }
+            testRow
             NavigationLink {
                 KeyPermissionsGuideView(mode: config.executionMode)
             } label: {
                 Label("Permissions this key needs", systemImage: "key.viewfinder")
             }
-        } header: {
-            HStack {
-                Text("Access key")
-                Spacer()
-                Button(pasteMode ? "Back to fields" : "Paste credentials") {
-                    pasteBuffer = ""
-                    pasteMode.toggle()
-                }
-                .font(.caption.weight(.medium))
-                .textCase(nil)
-            }
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
+                if let test {
+                    Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
+                }
                 if !config.secretId.isEmpty && !config.secretId.hasPrefix("AKID") {
                     Text("Tencent SecretIds usually start with AKID.")
                         .foregroundStyle(.orange)
@@ -216,39 +220,22 @@ struct SettingsView: View {
         }
     }
 
-    private var testSection: some View {
-        Section {
-            Button {
-                Task { await testConnection() }
-            } label: {
-                HStack {
-                    Text("Test connection")
-                    Spacer()
-                    if isTesting {
-                        ProgressView()
-                    } else if let test {
-                        Image(systemName: test.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(test.ok ? .green : .red)
-                    }
+    private var testRow: some View {
+        Button {
+            Task { await testConnection() }
+        } label: {
+            HStack {
+                Label("Test connection", systemImage: "bolt.horizontal.circle")
+                Spacer()
+                if isTesting {
+                    ProgressView()
+                } else if let test {
+                    Image(systemName: test.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(test.ok ? .green : .red)
                 }
             }
-            .disabled(isTesting || (config.secretId.isEmpty && !config.isDemoMode))
-        } footer: {
-            if let test {
-                Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
-            }
         }
-    }
-
-    /// One account form at a time; same segmented style as Runs from.
-    private var accountPickerSection: some View {
-        Section("Cloud account") {
-            Picker("Cloud account", selection: $accountVendor) {
-                ForEach(CloudVendor.allCases) { Text($0.displayName).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.vertical, 4)
-        }
+        .disabled(isTesting || (config.secretId.isEmpty && !config.isDemoMode))
     }
 
     /// All history and logs live on this one page.
@@ -257,7 +244,7 @@ struct SettingsView: View {
             NavigationLink {
                 ActivityLogView(manager: manager)
             } label: {
-                Text("Activity log")
+                Label("Activity log", systemImage: "list.bullet.rectangle")
             }
         }
     }
@@ -298,5 +285,18 @@ struct SettingsView: View {
         } footer: {
             Text("Simulates a session with no cloud calls and no cost.")
         }
+    }
+}
+
+/// Picks which cloud's key form is shown; first row of the account card.
+struct VendorPicker: View {
+    @Binding var selection: CloudVendor
+
+    var body: some View {
+        Picker("Cloud", selection: $selection) {
+            ForEach(CloudVendor.allCases) { Text($0.displayName).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .padding(.vertical, 4)
     }
 }

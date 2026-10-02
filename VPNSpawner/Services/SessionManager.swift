@@ -364,11 +364,24 @@ final class SessionManager: ObservableObject {
         guard let session = currentSession, let ip = session.publicIP else { return }
         setStage(.installing)
         let deadline = Date().addingTimeInterval(Self.installTimeout)
+        var lastStage: String?
         while Date() < deadline {
-            if let health = await NodeHealth.check(ip: ip), health.isReady {
-                try Task.checkCancellation()
-                await markReady(config: config, credential: credential)
-                return
+            if let health = await NodeHealth.check(ip: ip) {
+                if let stage = health.stage, stage != lastStage {
+                    lastStage = stage
+                    appendLog("Node: \(stage)")
+                }
+                if health.stage == "failed" {
+                    throw CloudAPIError.badResponse("Node setup failed: \(health.error ?? "unknown error"). Clean Up and launch again.")
+                }
+                if health.isReady {
+                    try Task.checkCancellation()
+                    for (proto, reason) in health.unavailable ?? [:] {
+                        appendLog("Unavailable: \(proto) (\(reason))")
+                    }
+                    await markReady(config: config, credential: credential)
+                    return
+                }
             }
             try await Task.sleep(nanoseconds: 5_000_000_000)
         }

@@ -4,8 +4,10 @@ import re
 import base64
 import gzip
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from tencentcloud.common import credential
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
 try:
@@ -124,19 +126,96 @@ def terminate_timers(client, instance_id):
     return [t for t in client.DescribeInstancesActionTimer(req).ActionTimers or []
             if t.InstanceId == instance_id and t.TimerAction == "TerminateInstances" and t.Status in ("UNDO", None)]
 
-def reschedule_terminate(client, instance_id, expires_at):
-    old = [t.ActionTimerId for t in terminate_timers(client, instance_id)]
-    if old:
-        req = models.DeleteInstancesActionTimerRequest()
-        req.ActionTimerIds = old
-        client.DeleteInstancesActionTimer(req)
+def import_terminate_timer(client, instance_id, action_time):
     req = models.ImportInstancesActionTimerRequest()
     req.from_json_string(json.dumps({"InstanceIds": [instance_id], "ActionTimer": {
-        "TimerAction": "TerminateInstances", "ActionTime": timer_time(expires_at)}}))
+        "TimerAction": "TerminateInstances", "ActionTime": action_time}}))
     client.ImportInstancesActionTimer(req)
-    return timer_time(expires_at)
+
+def reschedule_terminate(client, instance_id, expires_at, attempts=3):
+    """Tencent allows one timer per instance, so it's delete-then-import. The gap is kept tiny by
+    retrying; if the new time can't be set the old one is restored, and the watchdog reaps any
+    instance left without a timer."""
+    old = terminate_timers(client, instance_id)
+    if old:
+        req = models.DeleteInstancesActionTimerRequest()
+        req.ActionTimerIds = [t.ActionTimerId for t in old]
+        client.DeleteInstancesActionTimer(req)
+    new_time = timer_time(expires_at)
+    for attempt in range(attempts):
+        try:
+            import_terminate_timer(client, instance_id, new_time)
+            return new_time
+        except TencentCloudSDKException:
+            if attempt == attempts - 1:
+                if old:
+                    import_terminate_timer(client, instance_id, timer_time(parse_time(old[0].ActionTime)))
+                raise
+            time.sleep(2)
+
+# Regions the app can launch in; the watchdog sweeps all of them.
+WATCH_REGIONS = ["ap-guangzhou", "ap-shanghai", "ap-beijing", "ap-hongkong", "ap-tokyo", "ap-singapore"]
+TIMERLESS_GRACE = timedelta(minutes=5)
+OVERDUE_GRACE = timedelta(minutes=10)
+
+def parse_time(value):
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+def reap_region(client, fw_client, now=None, timerless_grace=TIMERLESS_GRACE):
+    """Watchdog: terminate managed instances whose cloud timer is missing, failed or overdue."""
+    now = now or datetime.now(timezone.utc)
+    req = models.DescribeInstancesRequest()
+    req.from_json_string(json.dumps({"Filters": [{"Name": "tag:ManagedBy", "Values": ["VPNSpawner"]}], "Limit": 100}))
+    alive = [i for i in client.DescribeInstances(req).InstanceSet or []
+             if i.InstanceState not in ("TERMINATING", "SHUTDOWN", "LAUNCH_FAILED")]
+    reaped = {}
+    for inst in alive:
+        pending = [parse_time(t.ActionTime) for t in terminate_timers(client, inst.InstanceId)]
+        if not pending and now - parse_time(inst.CreatedTime) >= timerless_grace:
+            reaped[inst.InstanceId] = "no pending terminate timer"
+        elif pending and min(pending) < now - OVERDUE_GRACE:
+            reaped[inst.InstanceId] = f"terminate timer overdue since {min(pending):%H:%M}Z"
+    for instance_id in list(reaped):
+        if not terminate_instance(client, instance_id, wait_seconds=20):
+            reaped[instance_id] += " (terminate still pending; retried next run)"
+    try:
+        firewall.sweep_orphans(fw_client)
+    except Exception:
+        pass
+    return {"checked": [i.InstanceId for i in alive], "reaped": reaped}
 
 NODE_NAME = "vpn-spawner-node"
+GONE_STATES = ("TERMINATING", "SHUTDOWN", "LAUNCH_FAILED")
+
+def instance_state(client, instance_id):
+    req = models.DescribeInstancesRequest()
+    req.InstanceIds = [instance_id]
+    found = client.DescribeInstances(req).InstanceSet or []
+    return found[0].InstanceState if found else None
+
+def terminate_instance(client, instance_id, wait_seconds=90):
+    """Idempotent: already gone or terminating counts as done; waits out "operation in progress"
+    (e.g. still launching, or another terminate already running). Returns True once on its way out."""
+    deadline = time.time() + wait_seconds
+    while True:
+        try:
+            req = models.TerminateInstancesRequest()
+            req.InstanceIds = [instance_id]
+            req.ReleasePrepaidDataDisks = True
+            client.TerminateInstances(req)
+            return True
+        except TencentCloudSDKException as e:
+            code = e.get_code() or ""
+            if "NotFound" in code or "InvalidInstanceId" in code:
+                return True
+            state = instance_state(client, instance_id)
+            if state is None or state in GONE_STATES:
+                return True
+            if "InProgress" not in code and "InvalidInstanceState" not in code:
+                raise
+            if time.time() >= deadline:
+                return False
+            time.sleep(5)
 
 def replace_running_nodes(client):
     """One node at a time: terminate any managed instance still alive before launching another."""
@@ -144,10 +223,8 @@ def replace_running_nodes(client):
     req.from_json_string(json.dumps({"Filters": [{"Name": "tag:ManagedBy", "Values": ["VPNSpawner"]}], "Limit": 100}))
     alive = [i.InstanceId for i in client.DescribeInstances(req).InstanceSet or []
              if i.InstanceState not in ("TERMINATING", "SHUTDOWN", "LAUNCH_FAILED")]
-    if alive:
-        term = models.TerminateInstancesRequest()
-        term.InstanceIds = alive
-        client.TerminateInstances(term)
+    for instance_id in alive:
+        terminate_instance(client, instance_id)
     return alive
 
 def find_by_session(client, session_id):
@@ -159,6 +236,8 @@ def find_by_session(client, session_id):
     return client.DescribeInstances(req).InstanceSet or []
 
 def main_handler(event, context):
+    if event.get("Type") == "Timer":
+        event = {"action": "reap"}
     # SCF's Invoke API delivers ClientContext as the event itself; local callers wrap it.
     ctx_raw = event.get("ClientContext", event)
     if isinstance(ctx_raw, str):
@@ -244,6 +323,17 @@ def main_handler(event, context):
         return {"success": True, "instanceId": instance_id,
                 "terminateAt": reschedule_terminate(client, instance_id, expiry_from(req))}
 
+    elif action == "reap":
+        regions = req.get("regions") or WATCH_REGIONS
+        report = {}
+        for r in regions:
+            try:
+                grace = timedelta(seconds=int(req.get("timerlessGraceSeconds", TIMERLESS_GRACE.total_seconds())))
+                report[r] = reap_region(cvm_client.CvmClient(cred, r), firewall.get_client(cred, r), timerless_grace=grace)
+            except Exception as e:
+                report[r] = {"error": str(e)[:200]}
+        return {"success": True, "regions": report}
+
     elif action == "find":
         found = find_by_session(client, session_id)
         return {"success": True, "instances": [{
@@ -284,13 +374,11 @@ def main_handler(event, context):
     elif action == "terminate":
         instance_id = req.get("instanceId", "")
         sg_id = req.get("securityGroupId") or instance_firewall(client, fw_client, instance_id)
-        cvm_req = models.TerminateInstancesRequest()
-        cvm_req.InstanceIds = [instance_id]
-        cvm_req.ReleasePrepaidDataDisks = True
-        client.TerminateInstances(cvm_req)
+        terminated = terminate_instance(client, instance_id) if instance_id else True
         sg_deleted = None
         if sg_id and firewall.is_managed(fw_client, sg_id):
             sg_deleted = firewall.delete(fw_client, sg_id, wait_seconds=req.get("firewallWaitSeconds", 120))
-        return {"success": True, "status": "terminated", "securityGroupId": sg_id, "securityGroupDeleted": sg_deleted}
+        return {"success": terminated, "status": "terminated" if terminated else "terminate pending",
+                "securityGroupId": sg_id, "securityGroupDeleted": sg_deleted}
 
     return {"success": False, "message": f"Unknown action: {action}"}

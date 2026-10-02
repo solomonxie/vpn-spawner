@@ -173,6 +173,9 @@ enum NodeHealth {
         let shadowsocks: Bool?
         let ikev2: Bool?
         let ipsec_backend: Bool?
+        let stage: String?
+        let error: String?
+        let unavailable: [String: String]?
 
         /// Nodes report `ready` once every requested protocol is up; older nodes only the three flags.
         var isReady: Bool { ready ?? (shadowsocks == true && ikev2 == true && ipsec_backend == true) }

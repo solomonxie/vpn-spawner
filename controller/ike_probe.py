@@ -33,7 +33,16 @@ def build_init(spi):
     return header + body
 
 
-def probe(host, port=500, timeout=5):
+def probe(host, port=500, timeout=5, attempts=3):
+    """UDP can drop a single packet; retry before concluding there's no responder."""
+    for _ in range(attempts):
+        result = _probe_once(host, port, timeout)
+        if result is not None:
+            return result
+    return None
+
+
+def _probe_once(host, port, timeout):
     """Returns 'accepted' (responder chose our SA), 'notify:<type>', or None (no reply)."""
     spi = os.urandom(8)
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

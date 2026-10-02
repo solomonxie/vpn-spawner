@@ -3,7 +3,8 @@ import SwiftUI
 /// Session history + activity logs, rendered as the last sections of Settings.
 struct HistorySection: View {
     @ObservedObject var manager: SessionManager
-    @State private var showLogsSheet = false
+
+    static let recentCount = 5
 
     var body: some View {
         Section {
@@ -11,24 +12,30 @@ struct HistorySection: View {
                 Text("No past sessions")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(manager.history) { session in
-                    sessionRow(session)
+                ForEach(manager.history.prefix(Self.recentCount)) { session in
+                    Self.sessionRow(session)
                 }
             }
-            Button {
-                showLogsSheet = true
+            // Pushed, not a sheet: a sheet attached inside a Form section closed itself on first open.
+            NavigationLink {
+                ActivityLogView(manager: manager)
             } label: {
-                Label("Activity log", systemImage: "list.bullet.rectangle")
+                HStack {
+                    Label("Activity log", systemImage: "list.bullet.rectangle")
+                    Spacer()
+                    let older = max(0, manager.history.count - Self.recentCount)
+                    if older > 0 {
+                        Text("\(older) older")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         } header: {
             Text("History")
         }
-        .sheet(isPresented: $showLogsSheet) {
-            logsSheet
-        }
     }
 
-    private func sessionRow(_ session: SessionRecord) -> some View {
+    static func sessionRow(_ session: SessionRecord) -> some View {
         HStack(spacing: 12) {
             Image(systemName: session.cleanupVerified == true ? "checkmark.seal.fill" : "clock.arrow.circlepath")
                 .foregroundStyle(session.cleanupVerified == true ? .green : .secondary)
@@ -50,29 +57,33 @@ struct HistorySection: View {
         .accessibilityElement(children: .combine)
         .accessibilityValue(session.cleanupVerified == true ? "Verified deleted" : session.status.rawValue)
     }
+}
 
-    private var logsSheet: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(manager.logs, id: \.self) { log in
-                        Text(log)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+/// Older sessions (beyond the latest few) and the app's activity log.
+struct ActivityLogView: View {
+    @ObservedObject var manager: SessionManager
+
+    var body: some View {
+        List {
+            let older = manager.history.dropFirst(HistorySection.recentCount)
+            if !older.isEmpty {
+                Section("Earlier sessions") {
+                    ForEach(Array(older)) { HistorySection.sessionRow($0) }
                 }
-                .padding()
             }
-            .navigationTitle("Activity Log")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        showLogsSheet = false
-                    }
+            Section("Log") {
+                if manager.logs.isEmpty {
+                    Text("Nothing logged since the app started.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(Array(manager.logs.enumerated().reversed()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
                 }
             }
         }
+        .navigationTitle("Activity Log")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

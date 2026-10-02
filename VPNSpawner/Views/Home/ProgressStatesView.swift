@@ -14,7 +14,8 @@ struct ProvisioningView: View {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     ElapsedClock(
                         since: session.startTime,
-                        caption: "Launching · about \(Clock.format(session.estimatedSecondsLeft)) left"
+                        caption: session.estimatedSecondsLeft.map { "Launching · about \(Clock.format($0)) left" }
+                            ?? "Launching · taking longer than usual"
                     )
                 }
                 .padding(.top, 24)

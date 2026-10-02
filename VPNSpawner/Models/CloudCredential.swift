@@ -20,7 +20,7 @@ struct CloudCredentialConfig: Codable, Equatable {
     init(
         secretId: String = "",
         region: String = CloudCredentialConfig.defaultRegion,
-        executionMode: ExecutionMode = .direct,
+        executionMode: ExecutionMode = .controller,
         controllerFunctionName: String = CloudCredentialConfig.defaultFunctionName,
         isDemoMode: Bool = false
     ) {

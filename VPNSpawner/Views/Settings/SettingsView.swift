@@ -166,14 +166,7 @@ struct SettingsView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
 
-            if config.executionMode == .direct {
-                tradeoff(.pro, "Nothing to set up. Free.")
-                tradeoff(.pro, "Works right now with the key below.")
-                tradeoff(.con, "Each step runs from this phone. If closed, it resumes when reopened; Tencent's timer still deletes the server on time.")
-            } else {
-                tradeoff(.pro, "Launch, allowlist and cleanup run inside Tencent, so a flaky phone connection can't interrupt them.")
-                tradeoff(.con, "One-time setup in your Tencent account (role + function).")
-                tradeoff(.con, "Costs a little: under ¥0.01 per session.")
+            if config.executionMode == .controller {
                 functionRow
                 NavigationLink {
                     CloudFunctionGuideView(functionName: config.controllerFunctionName)
@@ -183,17 +176,29 @@ struct SettingsView: View {
             }
         } header: {
             Text("Runs from")
+        } footer: {
+            // Plain text, not rows, so the tradeoffs don't read as tappable options.
+            VStack(alignment: .leading, spacing: 4) {
+                if config.executionMode == .direct {
+                    tradeoff(.pro, "Nothing to set up. Free.")
+                    tradeoff(.con, "Steps run from this phone; if closed they resume on reopen. Tencent's timer still deletes the server on time.")
+                } else {
+                    tradeoff(.pro, "Launch, allowlist and cleanup run inside Tencent, unaffected by a flaky phone connection.")
+                    tradeoff(.pro, "A watchdog checks every 10 min that no server outlives its timer.")
+                    tradeoff(.con, "One-time setup (role + function). Under ¥0.01 per session.")
+                }
+            }
         }
     }
 
     private enum Tradeoff { case pro, con }
 
     private func tradeoff(_ kind: Tradeoff, _ text: String) -> some View {
-        Label {
-            Text(text).font(.subheadline)
-        } icon: {
-            Image(systemName: kind == .pro ? "checkmark.circle.fill" : "minus.circle.fill")
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(kind == .pro ? "+" : "−")
+                .fontWeight(.semibold)
                 .foregroundStyle(kind == .pro ? .green : .orange)
+            Text(text)
         }
     }
 

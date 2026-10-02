@@ -235,21 +235,33 @@ enum ComputeClient {
         let old = (try JSONDecoder().decode(TimersResp.self, from: data).Response.ActionTimers ?? [])
             .filter { $0.InstanceId == instanceId && $0.TimerAction == "TerminateInstances" && ($0.Status ?? "UNDO") == "UNDO" }
             .compactMap(\.ActionTimerId)
+        // Tencent allows one timer per instance: delete, then import with retries. The watchdog
+        // (controller reap, every 10 min) terminates anything left without a timer.
         if !old.isEmpty {
             _ = try await CloudAPIClient.request(
                 host: host, service: service, action: "DeleteInstancesActionTimer", version: version,
                 region: region, payload: ["ActionTimerIds": old], credential: credential
             )
         }
-        _ = try await CloudAPIClient.request(
-            host: host, service: service, action: "ImportInstancesActionTimer", version: version,
-            region: region,
-            payload: [
-                "InstanceIds": [instanceId],
-                "ActionTimer": ["TimerAction": "TerminateInstances", "ActionTime": timerTime(date)],
-            ],
-            credential: credential
-        )
+        var lastError: Error?
+        for attempt in 1...3 {
+            do {
+                _ = try await CloudAPIClient.request(
+                    host: host, service: service, action: "ImportInstancesActionTimer", version: version,
+                    region: region,
+                    payload: [
+                        "InstanceIds": [instanceId],
+                        "ActionTimer": ["TimerAction": "TerminateInstances", "ActionTime": timerTime(date)],
+                    ],
+                    credential: credential
+                )
+                return
+            } catch {
+                lastError = error
+                if attempt < 3 { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            }
+        }
+        throw lastError ?? CloudAPIError.badResponse("Couldn't set the delete timer")
     }
 
     /// One node at a time: terminates any managed instance still alive. Returns their IDs.

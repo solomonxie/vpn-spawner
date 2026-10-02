@@ -72,8 +72,8 @@ struct IdleView: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Auto-stop after")
-                    Picker("Auto-stop after", selection: $prefs.durationMinutes) {
+                    Text("Auto-destroy after")
+                    Picker("Auto-destroy after", selection: $prefs.durationMinutes) {
                         ForEach(LaunchPreferences.durations, id: \.self) { minutes in
                             Text(minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h").tag(minutes)
                         }
@@ -168,7 +168,7 @@ struct IdleView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.large)
             .disabled(manager.isOperating || prefs.protocols.isEmpty)
-            Text("About ¥0.05/hr · \(Self.regionName(prefs.region)) · stops after \(prefs.durationMinutes) min")
+            Text("About ¥0.05/hr · \(Self.regionName(prefs.region)) · auto-destroys after \(prefs.durationMinutes) min")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

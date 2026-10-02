@@ -198,9 +198,16 @@ def protocol_status():
     return status
 
 
+def setup_error():
+    try:
+        return open("/etc/vpn-node/setup_error").read().strip()
+    except OSError:
+        return None
+
+
 def health():
     if not load_node():
-        return json.dumps({"ready": False, "stage": stage()}).encode()
+        return json.dumps({"ready": False, "stage": stage(), "error": setup_error()}).encode()
     status = protocol_status()
     unavailable = NODE.get("unavailable", {})
     return json.dumps({
@@ -284,8 +291,21 @@ systemctl daemon-reload
 systemctl enable --now vpn-sub.service
 
 stage "installing packages"
-apt-get update -y
-apt-get install -y $PKGS
+# Ubuntu's boot-time unattended-upgrades holds the dpkg lock; an install racing it fails instantly
+# and leaves the node with nothing installed.
+systemctl stop unattended-upgrades apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+APT="apt-get -y -o DPkg::Lock::Timeout=300"
+for attempt in 1 2 3; do
+  $APT update && $APT install $PKGS && break
+  echo "apt attempt $attempt failed; retrying"
+  sleep 10
+done
+fail() { echo "$1" > /etc/vpn-node/setup_error; stage "failed"; exit 1; }
+for bin in python3 curl iptables openssl; do command -v "$bin" >/dev/null || fail "package install failed: $bin missing"; done
+wants_any shadowsocks ss_obfs && { command -v ss-server >/dev/null || fail "package install failed: shadowsocks-libev missing"; }
+wants ss_obfs && { command -v obfs-server >/dev/null || fail "package install failed: simple-obfs missing"; }
+wants ikev2 && { command -v swanctl >/dev/null || fail "package install failed: strongswan missing"; }
+wants wireguard && { command -v wg >/dev/null || fail "package install failed: wireguard-tools missing"; }
 
 sysctl -w net.ipv4.ip_forward=1
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -458,7 +478,11 @@ if SINGBOX_PROTOCOLS & set(protocols) and not os.path.exists(SINGBOX):
     for p in sorted(SINGBOX_PROTOCOLS & set(protocols)):
         node["unavailable"][p] = "sing-box download failed (GitHub and mirrors unreachable)"
     protocols = [p for p in protocols if p not in SINGBOX_PROTOCOLS]
-if "wireguard" in protocols and not os.path.exists("/etc/vpn-node/wg_server.pub"):
+def nonempty(path):
+    return os.path.exists(path) and os.path.getsize(path) > 0
+
+
+if "wireguard" in protocols and not (nonempty("/etc/vpn-node/wg_server.pub") and nonempty("/etc/vpn-node/wg_client.key")):
     node["unavailable"]["wireguard"] = "WireGuard key generation failed"
     protocols.remove("wireguard")
 node["protocols"] = protocols
@@ -518,7 +542,7 @@ os.chmod("/etc/vpn-node/node.json", 0o600)
 PYEOF
 PUBLIC_IP="$PUBLIC_IP" WAN_IF="$WAN_IF" WG_POOL="$WG_POOL" TAG="$TAG" PROTOCOLS="$PROTOCOLS" \
   SS_PORT="$SS_PORT" SS_PASSWORD="$SS_PASSWORD" SS_METHOD="$SS_METHOD" IKEV2_PSK="$IKEV2_PSK" \
-  python3 /opt/vpn-sub/setup.py
+  python3 /opt/vpn-sub/setup.py 2>/tmp/setup.err || fail "configuring protocols failed: $(tail -1 /tmp/setup.err)"
 
 if [ -f /etc/vpn-node/sing-box.json ] && [ -x /usr/local/bin/sing-box ]; then
   cat > /etc/systemd/system/sing-box.service <<EOF

@@ -120,11 +120,11 @@ struct SessionRecord: Codable, Identifiable, Hashable {
 
     var provisioningElapsed: TimeInterval { Date().timeIntervalSince(startTime) }
 
-    /// Estimated seconds until ready, from the current stage's typical remaining time.
-    var estimatedSecondsLeft: TimeInterval {
+    /// Estimated seconds until ready from the current stage's typical remaining time; nil once overdue.
+    var estimatedSecondsLeft: TimeInterval? {
         guard let stage else { return ProvisionStage.preparing.typicalRemaining }
-        let inStage = Date().timeIntervalSince(stageStartedAt ?? startTime)
-        return max(5, stage.typicalRemaining - inStage)
+        let left = stage.typicalRemaining - Date().timeIntervalSince(stageStartedAt ?? startTime)
+        return left > 0 ? left : nil
     }
 
     var hasExpired: Bool {

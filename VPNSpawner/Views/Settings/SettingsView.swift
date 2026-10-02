@@ -12,13 +12,20 @@ struct SettingsView: View {
     @State private var isTesting = false
     @State private var loaded = false
     @State private var editingFunctionName = false
+    @State private var accountVendor = LaunchPreferences.load().effectiveVendor
 
     var body: some View {
         Form {
             modeSection
-            credentialsSection
-            testSection
-            AWSCredentialsSection()
+            accountPickerSection
+            switch accountVendor {
+            case .tencent:
+                credentialsSection
+                testSection
+            case .aws:
+                AWSCredentialsSection()
+            }
+            activitySection
             demoSection
         }
         .scrollDismissesKeyboard(.immediately)
@@ -97,6 +104,10 @@ struct SettingsView: View {
                     .accessibilityLabel(showSecretKey ? "Hide SecretKey" : "Show SecretKey")
                 }
             }
+            // Mirrors the AWS block: the function this key invokes sits with the key.
+            if config.executionMode == .controller {
+                functionRow
+            }
             NavigationLink {
                 KeyPermissionsGuideView(mode: config.executionMode)
             } label: {
@@ -174,7 +185,6 @@ struct SettingsView: View {
             .padding(.vertical, 4)
 
             if config.executionMode == .controller {
-                functionRow
                 NavigationLink {
                     CloudFunctionGuideView(functionName: config.controllerFunctionName)
                 } label: {
@@ -239,15 +249,35 @@ struct SettingsView: View {
                 }
             }
             .disabled(isTesting || (config.secretId.isEmpty && !config.isDemoMode))
-            // All history and logs live on this one page.
+        } footer: {
+            if let test {
+                Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
+            }
+        }
+    }
+
+    /// One account form at a time; same segmented style as Runs from.
+    private var accountPickerSection: some View {
+        Section {
+            Picker("Cloud account", selection: $accountVendor) {
+                ForEach(CloudVendor.allCases) { Text($0.displayName).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.vertical, 4)
+        } header: {
+            Text("Cloud account")
+        } footer: {
+            Text("Add the key for each cloud you launch on. The launch screen picks which cloud to use.")
+        }
+    }
+
+    /// All history and logs live on this one page.
+    private var activitySection: some View {
+        Section {
             NavigationLink {
                 ActivityLogView(manager: manager)
             } label: {
                 Text("Activity log")
-            }
-        } footer: {
-            if let test {
-                Text(test.text).foregroundStyle(test.ok ? Color.secondary : Color.red)
             }
         }
     }

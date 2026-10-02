@@ -26,6 +26,7 @@ enum CloudVendor: String, Codable, CaseIterable, Identifiable {
             return [
                 ("us-west-2", "Oregon"), ("us-east-1", "N. Virginia"), ("ca-central-1", "Canada"),
                 ("eu-central-1", "Frankfurt"), ("ap-northeast-1", "Tokyo"), ("ap-southeast-1", "Singapore"),
+                ("ap-east-1", "Hong Kong"), ("ap-east-2", "Taipei"),
             ]
         }
     }
@@ -42,6 +43,7 @@ enum CloudVendor: String, Codable, CaseIterable, Identifiable {
     static func flag(_ region: String) -> String {
         switch region {
         case "ap-hongkong", "ap-east-1": return "🇭🇰"
+        case "ap-east-2": return "🇹🇼"
         case "ap-tokyo", "ap-northeast-1": return "🇯🇵"
         case "ap-singapore", "ap-southeast-1": return "🇸🇬"
         case "ca-central-1": return "🇨🇦"

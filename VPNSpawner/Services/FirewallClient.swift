@@ -136,33 +136,12 @@ enum FirewallClient {
 }
 
 enum PublicIPService {
-    /// Mixes global and China-reachable services: ipify is often unreachable through a China exit.
-    private static let sources = [
-        "https://api.ipify.org",
-        "https://ip.3322.net",
-        "https://myip.ipip.net",
-        "https://checkip.amazonaws.com",
-    ]
     static let browserCheckURL = URL(string: "https://myip.ipip.net")!
 
     static func current() async throws -> String {
-        for urlString in sources {
-            guard let url = URL(string: urlString) else { continue }
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 5
-            if let (data, _) = try? await URLSession.shared.data(for: request),
-               let body = String(data: data, encoding: .utf8),
-               let ip = firstIPv4(in: body) {
-                return ip
-            }
-        }
-        throw CloudAPIError.badResponse("Could not detect current public IP")
+        try await IPEcho.lookup(preferChina: TimeZone.current.identifier == "Asia/Shanghai").ip
     }
 
-    private static func firstIPv4(in text: String) -> String? {
-        guard let range = text.range(of: #"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, options: .regularExpression) else { return nil }
-        return String(text[range])
-    }
 }
 
 /// The node's own /health (reachable because the phone's IP is allowlisted).

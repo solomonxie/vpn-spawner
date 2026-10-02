@@ -3,6 +3,7 @@ import SwiftUI
 /// Runs the in-app privacy checks and explains what a VPN can and can't hide.
 struct PrivacyCheckView: View {
     let nodeIP: String
+    var region: String? = nil
     @StateObject private var check = PrivacyCheck()
 
     private static let browserTests: [(title: String, url: String, what: String)] = [
@@ -65,7 +66,7 @@ struct PrivacyCheckView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Privacy check")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await check.run(nodeIP: nodeIP) }
+        .task { await check.run(nodeIP: nodeIP, region: region) }
     }
 
     private var summary: some View {
@@ -79,7 +80,7 @@ struct PrivacyCheckView: View {
             }
             Spacer()
             Button {
-                Task { await check.run(nodeIP: nodeIP) }
+                Task { await check.run(nodeIP: nodeIP, region: region) }
             } label: {
                 Text("Run again")
             }

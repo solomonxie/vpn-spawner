@@ -30,7 +30,7 @@ struct ReadyView: View {
             Section {
                 testRow
                 NavigationLink {
-                    PrivacyCheckView(nodeIP: ip)
+                    PrivacyCheckView(nodeIP: ip, region: session.region)
                 } label: {
                     Label("Full privacy check", systemImage: "eye.trianglebadge.exclamationmark")
                 }
@@ -185,20 +185,16 @@ struct ReadyView: View {
 
     private var testRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    Task { await runTest() }
-                } label: {
+            Button {
+                Task { await runTest() }
+            } label: {
+                HStack {
                     Label(isTesting ? "Testing…" : "Test VPN", systemImage: "checkmark.shield")
+                    Spacer()
+                    if isTesting { ProgressView() }
                 }
-                .disabled(isTesting)
-                Spacer()
-                Link(destination: PublicIPService.browserCheckURL) {
-                    Label("Open IP check", systemImage: "safari")
-                        .labelStyle(.iconOnly)
-                }
-                .accessibilityLabel("Open IP check in Safari")
             }
+            .disabled(isTesting)
             if let test {
                 Label(test.text, systemImage: test.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .font(.footnote)
@@ -212,13 +208,20 @@ struct ReadyView: View {
         isTesting = true
         defer { isTesting = false }
         do {
-            let seen = try await PublicIPService.current()
+            let (seen, place) = try await exitAddress()
+            let where_ = place.map { " · \($0)" } ?? ""
             test = seen == ip
-                ? (true, "Working. The internet sees \(seen).")
-                : (false, "Not through the node. The internet sees \(seen).")
+                ? (true, "Working. The internet sees \(seen)\(where_).")
+                : (false, "Not through the server. The internet sees \(seen)\(where_). Connect, then test again.")
         } catch {
             test = (false, "Couldn't check: \(error.localizedDescription)")
         }
+    }
+
+    /// Races many IP echo services (China-reachable ones first for mainland nodes); first answer wins.
+    private func exitAddress() async throws -> (String, String?) {
+        let answer = try await IPEcho.lookup(preferChina: IPEcho.mainlandRegions.contains(session.region))
+        return (answer.ip, answer.place)
     }
 
     // MARK: Rows

@@ -24,6 +24,11 @@ targets:
     info:
       path: VPNSpawner/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only Apple's crypto: IKEv2 via NetworkExtension, HTTPS, CryptoKit HMAC request signing.
+        # See docs/release/listing.md "Export compliance".
+        ITSAppUsesNonExemptEncryption: false
         # Nodes are reached by bare IP over HTTP (/health, /sub, profile); no TLS possible.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -33,7 +38,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.vpnspawner
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         CODE_SIGN_STYLE: Automatic

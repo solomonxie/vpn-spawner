@@ -27,6 +27,29 @@ struct ReadyView: View {
                 Section { connectRow } footer: { connectFooter }
             }
 
+            // Second most common action, so it sits right under Connect — but as an outlined
+            // button in its own section (gap + confirmation) so it can't be hit by accident.
+            Section {
+                Button(role: .destructive) {
+                    confirmStop = true
+                } label: {
+                    Label("Stop & Clean Up", systemImage: "trash")
+                        .font(.body.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+                .tint(.red)
+                .disabled(manager.isOperating)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 4, trailing: 0))
+            } footer: {
+                Text("Disconnects, deletes the server and its firewall, then verifies nothing is left billing.")
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+            }
+
             Section {
                 testRow
                 NavigationLink {
@@ -75,16 +98,6 @@ struct ReadyView: View {
                 }
             }
 
-            Section {
-                Button(role: .destructive) {
-                    confirmStop = true
-                } label: {
-                    Text("Stop & Clean Up")
-                        .frame(maxWidth: .infinity)
-                }
-            } footer: {
-                Text("Disconnects, deletes the server and its firewall, then verifies nothing is left billing.")
-            }
         }
         .listStyle(.insetGrouped)
         .toast($toast)

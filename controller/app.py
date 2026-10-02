@@ -90,7 +90,7 @@ def normalize_protocols(requested):
         raise ValueError(f"Unknown protocols: {sorted(unknown)}")
     return [p for p in PROTOCOLS if p in requested]
 
-def build_user_data(shadowsocks, ikev2_psk, protocols=None):
+def render_bootstrap(shadowsocks, ikev2_psk, protocols=None):
     values = {
         "SS_PORT": str(int(shadowsocks.get("port", 8388))),
         "SS_PASSWORD": shadowsocks.get("password", ""),
@@ -103,8 +103,14 @@ def build_user_data(shadowsocks, ikev2_psk, protocols=None):
         if not SAFE_VALUE.match(value):
             raise ValueError(f"{key} has characters unsafe for the bootstrap script")
         script = script.replace("{{" + key + "}}", value)
-    # Tencent caps UserData at 16 KB (base64); cloud-init decompresses gzip user-data itself.
-    return base64.b64encode(gzip.compress(script.encode("utf-8"), mtime=0)).decode("utf-8")
+    return script
+
+def gzip_user_data(script):
+    """Tencent and AWS both cap user data at 16 KB; cloud-init decompresses gzip itself."""
+    return gzip.compress(script.encode("utf-8"), mtime=0)
+
+def build_user_data(shadowsocks, ikev2_psk, protocols=None):
+    return base64.b64encode(gzip_user_data(render_bootstrap(shadowsocks, ikev2_psk, protocols))).decode("utf-8")
 
 DEFAULT_MINUTES = 10
 MIN_TIMER_LEAD = timedelta(minutes=6)  # Tencent requires ActionTime > now + 5 min
@@ -247,6 +253,13 @@ def main_handler(event, context):
             req = {}
     else:
         req = ctx_raw
+
+    if req.get("vendor") == "aws":
+        try:
+            import aws_backend
+        except ImportError:
+            from controller import aws_backend
+        return aws_backend.handle(req)
 
     action = req.get("action", "")
     region = req.get("region", "ap-guangzhou")

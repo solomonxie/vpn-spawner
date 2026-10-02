@@ -43,10 +43,11 @@ def client_config(endpoint, server, socks_port):
            "route": {"final": "out"}}
     if endpoint["proto"] == "wireguard":
         p = endpoint["params"]
-        cfg["endpoints"] = [{"type": "wireguard", "tag": "out", "address": [p["address"]],
+        address = p["address"] if isinstance(p["address"], list) else [p["address"]]
+        cfg["endpoints"] = [{"type": "wireguard", "tag": "out", "address": address,
                              "private_key": p["private_key"],
                              "peers": [{"address": server, "port": endpoint["port"],
-                                        "public_key": p["server_public_key"], "allowed_ips": ["0.0.0.0/0"]}]}]
+                                        "public_key": p["server_public_key"], "allowed_ips": ["0.0.0.0/0", "::/0"]}]}]
         cfg["outbounds"] = [{"type": "direct", "tag": "direct"}]
     else:
         cfg["outbounds"] = [outbound(endpoint, server)]

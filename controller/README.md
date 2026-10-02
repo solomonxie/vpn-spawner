@@ -40,3 +40,15 @@ ingress ALL only from the caller's IPs (`/32`), egress open.
 | `terminate` | `instanceId` | terminate CVM, delete its SG |
 
 Orphaned managed SGs (instance gone) are swept on each `launch`.
+
+## AWS
+
+Same contract with `"vendor": "aws"` (Lambda `vpn-spawner-controller` in ca-central-1, deployed by
+`terraform/aws/vpn_spawner.tf`; build with `controller/package.sh`). Regions:
+us-west-2, us-east-1, ca-central-1, eu-central-1, ap-northeast-1, ap-southeast-1.
+Node: t3a.micro (falls back to t3.micro), Ubuntu 22.04, default VPC.
+
+Self-destruct, three layers: per-node EventBridge Scheduler one-time schedule
+(`vpn-spawner-<instance>`, moved in place by `extend`), the watchdog schedule (`reap` every
+10 min), and the node shutting itself down 15 min past its `ExpiresAt` tag
+(InstanceInitiatedShutdownBehavior=terminate).

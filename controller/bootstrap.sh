@@ -11,6 +11,7 @@ TAG='{{TAG}}'
 IKEV2_PSK='{{IKEV2_PSK}}'
 PROTOCOLS='{{PROTOCOLS}}'
 VPN_POOL=10.99.0.0/24
+VPN_POOL6=fd00:99::/112
 WG_POOL=10.66.0.0/24
 
 # sing-box serves ss2022 / VLESS Reality / VMess WS / Trojan / Hysteria2. Pinned + checksummed, so a
@@ -27,8 +28,19 @@ wants_any shadowsocks ss_obfs && PKGS="$PKGS shadowsocks-libev"
 wants ss_obfs && PKGS="$PKGS simple-obfs"
 wants ikev2 && PKGS="$PKGS charon-systemd strongswan-swanctl libcharon-extra-plugins"
 wants wireguard && PKGS="$PKGS wireguard-tools"
-PUBLIC_IP=$(curl -s --retry 10 --retry-delay 2 http://metadata.tencentyun.com/latest/meta-data/public-ipv4)
-APP_ID=$(curl -s --retry 5 http://metadata.tencentyun.com/latest/meta-data/app-id)
+# Vendor from metadata: AWS IMDSv2 hands out a token; otherwise Tencent's metadata service.
+AWS_TOKEN=$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+if [[ "$AWS_TOKEN" =~ ^[A-Za-z0-9_=+/-]{20,}$ ]]; then
+  VENDOR=aws
+  imds() { curl -s -m 3 -H "X-aws-ec2-metadata-token: $AWS_TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }
+  for _ in $(seq 10); do PUBLIC_IP=$(imds public-ipv4); [ -n "$PUBLIC_IP" ] && break; sleep 2; done
+  APP_ID=""
+else
+  VENDOR=tencent
+  PUBLIC_IP=$(curl -s --retry 10 --retry-delay 2 http://metadata.tencentyun.com/latest/meta-data/public-ipv4)
+  APP_ID=$(curl -s --retry 5 http://metadata.tencentyun.com/latest/meta-data/app-id)
+fi
+[[ "$PUBLIC_IP" =~ ^[0-9.]+$ ]] || PUBLIC_IP=$(curl -s -m 5 https://api.ipify.org || curl -s -m 5 https://ip.3322.net)
 WAN_IF=$(ip route get 1.1.1.1 | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
 mkdir -p /etc/vpn-node /opt/vpn-sub
 chmod 700 /etc/vpn-node
@@ -120,12 +132,12 @@ def endpoints():
                     "note": "UDP. Self-signed certificate: insecure",
                     "params": {"password": NODE["hy2_password"], "sni": "www.bing.com"}})
     if "wireguard" in p and "wg_server_pub" in NODE:
-        conf = (f"[Interface]\nPrivateKey = {NODE['wg_client_key']}\nAddress = 10.66.0.2/32\nDNS = 119.29.29.29\n\n"
+        conf = (f"[Interface]\nPrivateKey = {NODE['wg_client_key']}\nAddress = 10.66.0.2/32, fd00:66::2/128\nDNS = 119.29.29.29\n\n"
                 f"[Peer]\nPublicKey = {NODE['wg_server_pub']}\nEndpoint = {IP}:51820\n"
-                f"AllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n")
+                f"AllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n")
         out.append({"proto": "wireguard", "port": 51820, "uri": conf, "note": "Import into the WireGuard app",
                     "params": {"private_key": NODE["wg_client_key"], "server_public_key": NODE["wg_server_pub"],
-                               "address": "10.66.0.2/32"}})
+                               "address": ["10.66.0.2/32", "fd00:66::2/128"]}})
     return out
 
 
@@ -308,6 +320,10 @@ wants ikev2 && { command -v swanctl >/dev/null || fail "package install failed: 
 wants wireguard && { command -v wg >/dev/null || fail "package install failed: wireguard-tools missing"; }
 
 sysctl -w net.ipv4.ip_forward=1
+# Clients route all IPv6 into the tunnel; the node has no IPv6 egress, so reject it fast (apps fall
+# back to IPv4) rather than letting it bypass the VPN.
+sysctl -w net.ipv6.conf.all.forwarding=1
+ip6tables -A FORWARD -s fd00::/8 -j REJECT --reject-with icmp6-adm-prohibited
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
 # --- Shadowsocks (plain on SS_PORT; obfs on 8390 as a second ss-server instance) ---
@@ -337,7 +353,7 @@ connections {
   ikev2-psk {
     version = 2
     proposals = aes256-sha256-modp2048,aes256-sha256-ecp256,aes128-sha256-modp2048,aes256-sha1-modp2048,aes256-sha256-modp1024,aes128-sha1-modp1024,default
-    pools = vpn-pool
+    pools = vpn-pool, vpn-pool6
     unique = never
     dpd_delay = 30s
     send_certreq = no
@@ -350,7 +366,8 @@ connections {
     }
     children {
       ikev2-psk {
-        local_ts = 0.0.0.0/0
+        # ::/0 too: IPv6 enters the tunnel and is rejected there instead of leaking around it.
+        local_ts = 0.0.0.0/0, ::/0
         esp_proposals = aes256-sha256,aes128-sha256,aes256gcm16,aes128gcm16,aes256-sha1,aes128-sha1,default
         dpd_action = clear
       }
@@ -361,6 +378,9 @@ pools {
   vpn-pool {
     addrs = $VPN_POOL
     dns = 119.29.29.29, 1.1.1.1
+  }
+  vpn-pool6 {
+    addrs = $VPN_POOL6
   }
 }
 secrets {
@@ -407,7 +427,7 @@ if [ "$SINGBOX_NEEDED" = yes ]; then
   GH="https://github.com/SagerNet/sing-box/releases/download/v$SINGBOX_VERSION/$ASSET"
   # Same-region COS copy (internal network, free) named from this account's app-id; GitHub + mirrors race it.
   python3 - "$TGZ" "$SINGBOX_SHA256" \
-    "https://vpn-spawner-assets-$APP_ID.cos.ap-guangzhou.myqcloud.com/sing-box/$ASSET" \
+    ${APP_ID:+"https://vpn-spawner-assets-$APP_ID.cos.ap-guangzhou.myqcloud.com/sing-box/$ASSET"} \
     "$GH" "https://ghfast.top/$GH" "https://gh-proxy.com/$GH" "https://ghproxy.net/$GH" "https://gh.llkk.cc/$GH" <<'PYEOF'
 import hashlib, shutil, sys, threading, time, urllib.request
 dest, sha, urls = sys.argv[1], sys.argv[2], sys.argv[3:]
@@ -524,7 +544,7 @@ if "wireguard" in protocols:
     node.update(wg_server_pub=read("wg_server.pub"), wg_client_key=read("wg_client.key"))
     with open("/etc/wireguard/wg0.conf", "w") as f:
         f.write(f"""[Interface]
-Address = 10.66.0.1/24
+Address = 10.66.0.1/24, fd00:66::1/64
 ListenPort = 51820
 PrivateKey = {read("wg_server.key")}
 PostUp = iptables -t nat -A POSTROUTING -s {env["WG_POOL"]} -o {env["WAN_IF"]} -j MASQUERADE
@@ -532,7 +552,7 @@ PostDown = iptables -t nat -D POSTROUTING -s {env["WG_POOL"]} -o {env["WAN_IF"]}
 
 [Peer]
 PublicKey = {read("wg_client.pub")}
-AllowedIPs = 10.66.0.2/32
+AllowedIPs = 10.66.0.2/32, fd00:66::2/128
 """)
     os.chmod("/etc/wireguard/wg0.conf", 0o600)
 
@@ -563,6 +583,20 @@ EOF
 fi
 if wants wireguard; then
   systemctl enable --now wg-quick@wg0
+fi
+
+# AWS third layer: the node shuts itself down 15 min past its ExpiresAt instance tag (moved by
+# extend); InstanceInitiatedShutdownBehavior=terminate makes that a termination.
+if [ "$VENDOR" = aws ]; then
+  cat > /opt/vpn-sub/expiry_guard.sh <<'EOF'
+#!/bin/bash
+T=$(curl -s -m 3 -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+EXP=$(curl -s -m 3 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/tags/instance/ExpiresAt)
+[[ "$EXP" =~ ^[0-9]{4}- ]] || exit 0
+[ "$(date -u +%s)" -gt "$(( $(date -u -d "$EXP" +%s) + 900 ))" ] && shutdown -h now "VPNSpawner expiry"
+EOF
+  chmod 755 /opt/vpn-sub/expiry_guard.sh
+  echo "*/5 * * * * root /opt/vpn-sub/expiry_guard.sh" > /etc/cron.d/vpn-expiry-guard
 fi
 
 stage "done"

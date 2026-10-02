@@ -59,8 +59,24 @@ def allow_ip(client, sg_id, ip):
     return allowed_ips(client, sg_id)
 
 
+def exists(client, sg_id):
+    try:
+        resp = client.DescribeSecurityGroups(_req(models.DescribeSecurityGroupsRequest, SecurityGroupIds=[sg_id]))
+    except TencentCloudSDKException as e:
+        if "NotFound" in (e.code or ""):
+            return False
+        raise
+    return bool(resp.SecurityGroupSet)
+
+
 def is_managed(client, sg_id):
-    resp = client.DescribeSecurityGroups(_req(models.DescribeSecurityGroupsRequest, SecurityGroupIds=[sg_id]))
+    """False for groups that don't exist (already deleted) as well as unmanaged ones."""
+    try:
+        resp = client.DescribeSecurityGroups(_req(models.DescribeSecurityGroupsRequest, SecurityGroupIds=[sg_id]))
+    except TencentCloudSDKException as e:
+        if "NotFound" in (e.code or ""):
+            return False
+        raise
     return any(
         t.Key == MANAGED_TAG["Key"] and t.Value == MANAGED_TAG["Value"]
         for sg in resp.SecurityGroupSet for t in (sg.TagSet or [])

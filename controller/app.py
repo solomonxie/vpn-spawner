@@ -389,7 +389,9 @@ def main_handler(event, context):
         sg_id = req.get("securityGroupId") or instance_firewall(client, fw_client, instance_id)
         terminated = terminate_instance(client, instance_id) if instance_id else True
         sg_deleted = None
-        if sg_id and firewall.is_managed(fw_client, sg_id):
+        if sg_id and not firewall.exists(fw_client, sg_id):
+            sg_deleted = True  # already gone (earlier attempt, or the watchdog's sweep)
+        elif sg_id and firewall.is_managed(fw_client, sg_id):
             sg_deleted = firewall.delete(fw_client, sg_id, wait_seconds=req.get("firewallWaitSeconds", 120))
         return {"success": terminated, "status": "terminated" if terminated else "terminate pending",
                 "securityGroupId": sg_id, "securityGroupDeleted": sg_deleted}

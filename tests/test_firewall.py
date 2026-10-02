@@ -66,3 +66,14 @@ def test_delete_gives_up_without_wait():
 def test_unmanaged_group_not_recognised():
     vpc = FakeVpc()
     assert not firewall.is_managed(vpc, "sg-1")
+
+
+class GoneVpc(FakeVpc):
+    def DescribeSecurityGroups(self, req):
+        raise TencentCloudSDKException("ResourceNotFound", "sg not found")
+
+
+def test_deleted_group_counts_as_gone_not_an_error():
+    vpc = GoneVpc()
+    assert firewall.exists(vpc, "sg-1") is False
+    assert firewall.is_managed(vpc, "sg-1") is False

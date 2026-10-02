@@ -24,7 +24,7 @@ struct PermissionTemplate: Identifiable {
             "IAM → Users → Create user vpn-spawner-app, no console access.",
             "Add permissions → Create inline policy → JSON → paste the template below (put in your account ID).",
             "Security credentials → Create access key → Application running outside AWS.",
-            "Back here: in AWS, tap Paste both and paste the key file's contents.",
+            "Back here: in AWS, tap Paste credentials and paste the key file's contents.",
         ],
         policyJSON: """
         {
@@ -49,7 +49,7 @@ struct PermissionTemplate: Identifiable {
             "Policies → Create custom policy → Create by policy syntax → paste the template below → save as vpn-spawner.",
             "Attach the policy to the vpn-spawner user.",
             "Create an API key for that user and copy SecretId and SecretKey.",
-            "Back here: tap Paste both and paste them in one go.",
+            "Back here: tap Paste credentials and paste them in one go.",
         ],
         // Mirrors docs/permissions/cam-policy.json.
         policyJSON: """

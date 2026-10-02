@@ -76,7 +76,7 @@ struct AWSCredentialsSection: View {
             HStack {
                 Text("AWS")
                 Spacer()
-                Button(pasteMode ? "Back to fields" : "Paste both") {
+                Button(pasteMode ? "Back to fields" : "Paste credentials") {
                     pasteBuffer = ""
                     pasteMode.toggle()
                 }

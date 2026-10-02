@@ -121,7 +121,7 @@ struct SettingsView: View {
                         .presentationCompactAdaptation(.popover)
                 }
                 Spacer()
-                Button(pasteMode ? "Back to fields" : "Paste both") {
+                Button(pasteMode ? "Back to fields" : "Paste credentials") {
                     pasteBuffer = ""
                     pasteMode.toggle()
                 }

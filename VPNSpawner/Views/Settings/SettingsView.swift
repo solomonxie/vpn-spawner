@@ -211,6 +211,11 @@ struct SettingsView: View {
             } label: {
                 Label("Activity log", systemImage: "list.bullet.rectangle")
             }
+            NavigationLink {
+                DataUseView()
+            } label: {
+                Label("Data use", systemImage: "hand.raised")
+            }
         }
     }
 

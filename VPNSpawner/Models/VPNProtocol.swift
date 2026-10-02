@@ -32,11 +32,11 @@ enum VPNProtocol: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .ikev2: return "Built into iOS. One tap, no other app."
         case .shadowsocks: return "Simple and fast."
-        case .ssObfs: return "Shadowsocks disguised as HTTP."
+        case .ssObfs: return "Shadowsocks with an HTTP framing plugin."
         case .ss2022: return "Modern Shadowsocks, replay-resistant."
-        case .vlessReality: return "Hardest to detect. Borrows a real site's TLS."
+        case .vlessReality: return "VLESS over TLS 1.3 (Reality handshake)."
         case .vmessWS: return "Widest client support."
-        case .trojan: return "Looks like HTTPS."
+        case .trojan: return "Proxy protocol over TLS."
         case .hysteria2: return "QUIC. Fast on lossy networks."
         case .wireguard: return "Fast, simple. Needs the WireGuard app."
         }
@@ -46,8 +46,8 @@ enum VPNProtocol: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .ikev2: return "lock.shield"
         case .shadowsocks, .ss2022: return "bolt.horizontal"
-        case .ssObfs: return "theatermasks"
-        case .vlessReality: return "eye.slash"
+        case .ssObfs: return "square.stack.3d.up"
+        case .vlessReality: return "lock.rectangle"
         case .vmessWS: return "globe"
         case .trojan: return "lock"
         case .hysteria2: return "hare"

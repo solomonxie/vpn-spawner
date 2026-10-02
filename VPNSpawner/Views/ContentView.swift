@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var manager = SessionManager()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showDataUse = !DataUseView.isAccepted
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,12 @@ struct ContentView: View {
                     .accessibilityLabel("Settings")
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showDataUse) {
+            NavigationStack {
+                DataUseView { showDataUse = false }
+            }
+            .interactiveDismissDisabled()
         }
     }
 }

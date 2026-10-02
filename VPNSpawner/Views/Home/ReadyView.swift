@@ -27,27 +27,24 @@ struct ReadyView: View {
                 Section { connectRow } footer: { connectFooter }
             }
 
-            // Second most common action, so it sits right under Connect — but as an outlined
-            // button in its own section (gap + confirmation) so it can't be hit by accident.
+            // Red text, iOS's signal for a destructive secondary action: findable right under
+            // Connect without competing with it; the confirmation guards against slips.
             Section {
                 Button(role: .destructive) {
                     confirmStop = true
                 } label: {
-                    Label("Stop & Clean Up", systemImage: "trash")
-                        .font(.body.weight(.medium))
-                        .frame(maxWidth: .infinity)
+                    VStack(spacing: 2) {
+                        Text("Stop")
+                            .font(.body.weight(.semibold))
+                        Text("Destroys the server and its firewall")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .controlSize(.large)
-                .tint(.red)
+                .buttonStyle(.borderless)
                 .disabled(manager.isOperating)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 4, trailing: 0))
-            } footer: {
-                Text("Disconnects, deletes the server and its firewall, then verifies nothing is left billing.")
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
             }
 
             Section {
@@ -105,10 +102,10 @@ struct ReadyView: View {
             QRCodeView(content: item.content, title: item.title)
         }
         .confirmationDialog("Stop this server?", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("Stop & Clean Up", role: .destructive) {
+            Button("Stop", role: .destructive) {
                 Task { await manager.terminateSession() }
             }
-            Button("Keep Running", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
             Text("The VPN disconnects and the server at \(ip) is deleted.")
         }

@@ -1,0 +1,5 @@
+// Tracked. Placeholders; real values come from the gitignored Local.xcconfig, if present.
+DEVELOPMENT_TEAM =
+APP_BUNDLE_ID = com.example.vpnspawner
+PRODUCT_BUNDLE_IDENTIFIER = $(APP_BUNDLE_ID)
+#include? "Local.xcconfig"

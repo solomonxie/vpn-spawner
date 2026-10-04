@@ -1,8 +1,8 @@
-# Device signing: DEVELOPMENT_TEAM in Config/Local.xcconfig; DEVICE_UDID defaults to the first connected iPhone.
+# Device signing: DEVELOPMENT_TEAM and APP_BUNDLE_ID in Config/Local.xcconfig; DEVICE_UDID defaults to the first connected iPhone.
 SCHEME  := VPNSpawner
 DERIVED := build/install
 APP     := VPNSpawner.app
-APP_ID  := com.example.vpnspawner
+APP_ID  := $(shell sed -n 's/^APP_BUNDLE_ID *= *//p' Config/Local.xcconfig)
 DEVICE_UDID ?= $(shell xcrun devicectl list devices 2>/dev/null | awk '/physical/ && /connected/ {for (i=1;i<=NF;i++) if ($$i ~ /^[0-9A-F]{8}-[0-9A-F]{16}$$/ || $$i ~ /^[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}$$/) {print $$i; exit}}')
 
 .PHONY: help project test check device release screenshots

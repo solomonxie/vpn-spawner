@@ -18,7 +18,7 @@ Cloud account setup (controller, permissions, keys): [`docs/setup.md`](docs/setu
 ## Build
 
 ```bash
-cp Config/Local.xcconfig.example Config/Local.xcconfig   # set your Team ID (gitignored)
+cp Config/Local.xcconfig.example Config/Local.xcconfig   # set your Team ID and bundle ID (gitignored)
 python3 -m venv venv && venv/bin/pip install pytest boto3 tencentcloud-sdk-python
 make help        # project, test, check, device, release
 ```

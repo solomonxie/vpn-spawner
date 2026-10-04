@@ -1,3 +1,5 @@
-// Copy to Local.xcconfig (gitignored) and set your Apple Developer Team ID.
-// developer.apple.com → Account → Membership details → Team ID.
+// Copy to Local.xcconfig (gitignored) and set your own values.
+// Team ID: developer.apple.com → Account → Membership details → Team ID.
 DEVELOPMENT_TEAM = REPLACE_WITH_YOUR_TEAM_ID
+// Bundle ID registered in App Store Connect. The keychain service is derived from it ($(APP_BUNDLE_ID).ikev2).
+APP_BUNDLE_ID = com.example.vpnspawner

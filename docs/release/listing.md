@@ -77,7 +77,7 @@ Builds expire after **90 days**; upload a new one (`make release`) to keep testi
 ### Steps
 
 1. [ ] Apple Developer account active; App Store Connect → **Business**: no pending agreement banner.
-2. [ ] `cp Config/Local.xcconfig.example Config/Local.xcconfig`, set your Team ID (gitignored). `brew install xcodegen` if missing.
+2. [ ] `cp Config/Local.xcconfig.example Config/Local.xcconfig`, set your Team ID and bundle ID (gitignored). `brew install xcodegen` if missing.
 3. [ ] **Apps → + → New App**: iOS, Name `VPN Spawner`, English (U.S.), Bundle ID `com.example.vpnspawner`, SKU `vpnspawner-ios`, Full Access. (The Personal VPN capability is registered by the first automatic-signing build.)
 4. [ ] `make release` → tests, Release build, archive, upload. Processing 15–60 min.
 5. [ ] **TestFlight** → the build shows no "Missing Compliance".

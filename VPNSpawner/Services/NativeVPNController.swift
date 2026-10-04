@@ -12,7 +12,7 @@ final class NativeVPNController: ObservableObject {
     @Published private(set) var installedServer: String?
     @Published var lastError: String?
 
-    private let keychainService = "com.example.vpnspawner.ikev2"
+    private let keychainService = (Bundle.main.bundleIdentifier ?? "vpnspawner") + ".ikev2"
     private var manager: NEVPNManager { NEVPNManager.shared() }
 
     private init() {
